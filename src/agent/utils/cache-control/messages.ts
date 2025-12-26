@@ -1,16 +1,8 @@
 import type { ModelMessage, JSONValue, LanguageModel } from "ai";
-
-function isAnthropicModel(model: LanguageModel): boolean {
-  if (typeof model === "string") {
-    return model.includes("anthropic") || model.includes("claude");
-  }
-  return (
-    model.provider === "anthropic" ||
-    model.provider.includes("anthropic") ||
-    model.modelId.includes("anthropic") ||
-    model.modelId.includes("claude")
-  );
-}
+import {
+  isAnthropicModel,
+  DEFAULT_CACHE_CONTROL_OPTIONS,
+} from "./shared";
 
 /**
  * Adds provider-specific cache control options to messages for optimal caching.
@@ -40,9 +32,7 @@ function isAnthropicModel(model: LanguageModel): boolean {
 export function addCacheControlToMessages({
   messages,
   model,
-  providerOptions = {
-    anthropic: { cacheControl: { type: "ephemeral" } },
-  },
+  providerOptions = DEFAULT_CACHE_CONTROL_OPTIONS,
 }: {
   messages: ModelMessage[];
   model: LanguageModel;
