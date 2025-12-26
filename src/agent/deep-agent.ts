@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
+import { ToolLoopAgent, stepCountIs, type TypedToolResult } from "ai";
 import { z } from "zod";
 import {
   todoWriteTool,
@@ -73,13 +73,10 @@ export const deepAgent = new ToolLoopAgent({
   },
 });
 
-export function extractTodosFromStep(toolResults: Array<{ toolName: string; output?: unknown }>): TodoItem[] | null {
+export function extractTodosFromStep(toolResults: Array<TypedToolResult<typeof deepAgent.tools>>): TodoItem[] | null {
   for (const result of toolResults) {
-    if (result.toolName === "todo_write" && result.output) {
-      const output = result.output as { todos?: TodoItem[] } | undefined;
-      if (output?.todos) {
-        return output.todos;
-      }
+    if (!result.dynamic && result.toolName === "todo_write" && result.output) {
+        return result.output.todos;
     }
   }
   return null;
