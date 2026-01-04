@@ -13,19 +13,6 @@ export const todoItemSchema = z.object({
 });
 export type TodoItem = z.infer<typeof todoItemSchema>;
 
-export const memoryEntrySchema = z.object({
-  id: z.string(),
-  content: z.string(),
-  tags: z.array(z.string()),
-  createdAt: z.number(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
-
-export interface MemoryStore {
-  entries: MemoryEntry[];
-}
-
 /**
  * Agent execution modes that control behavior based on execution context.
  *
