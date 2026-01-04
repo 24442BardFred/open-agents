@@ -13,7 +13,7 @@ import { useExpandedView } from "./expanded-view-context.js";
 import { useTodoView } from "./todo-view-context.js";
 import { ToolCall } from "./components/tool-call.js";
 import { TaskGroupView } from "./components/task-group-view.js";
-import { StatusBar } from "./components/status-bar.js";
+import { StatusBar, StandaloneTodoList } from "./components/status-bar.js";
 import { InputBox } from "./components/input-box.js";
 import { Header } from "./components/header.js";
 import { pasteCollapseLineThreshold, tuiAgentModelId } from "./config.js";
@@ -483,7 +483,7 @@ function AppContent({ options }: AppProps) {
   const { exit } = useApp();
   const { chat, state, cycleAutoAcceptMode } = useChatContext();
   const { isExpanded, toggleExpanded } = useExpandedView();
-  const { toggleTodoView } = useTodoView();
+  const { isTodoVisible, toggleTodoView } = useTodoView();
   const [wasInterrupted, setWasInterrupted] = useState(false);
 
   const { messages, sendMessage, status, stop, error } = useChat({
@@ -514,6 +514,12 @@ function AppContent({ options }: AppProps) {
     }
     return { hasPendingApproval: false, activeApprovalId: null };
   }, [messages]);
+
+  // Extract todos for standalone display when not streaming
+  const todos = useMemo(
+    () => extractTodosFromLastAssistantMessage(messages),
+    [messages]
+  );
 
   useInput((input, key) => {
     if (key.escape && isStreaming) {
@@ -569,6 +575,10 @@ function AppContent({ options }: AppProps) {
 
       {isStreaming && (
         <StreamingStatusBar messages={messages} />
+      )}
+
+      {!isStreaming && todos && todos.length > 0 && (
+        <StandaloneTodoList todos={todos} isTodoVisible={isTodoVisible} />
       )}
 
       {!hasPendingApproval && !isExpanded && (
