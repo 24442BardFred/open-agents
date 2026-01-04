@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import * as path from "path";
 import { isPathWithinDirectory, getSandbox, sharedContext } from "../../utils";
+import { matchCommandPrefixRule } from "../../utils/session-rules";
 
 const TIMEOUT_MS = 120_000;
 
@@ -50,6 +51,19 @@ function createBashApprovalFn(options?: ToolOptions): ApprovalFn {
     // In background mode, auto-approve all operations within working directory
     if (sharedContext.mode === "background") {
       return false;
+    }
+
+    // Check session rules for command-prefix match
+    for (const rule of sharedContext.sessionRules) {
+      if (
+        matchCommandPrefixRule(
+          rule,
+          args.command,
+          sharedContext.workingDirectory,
+        )
+      ) {
+        return false; // Auto-approve, tool executes silently
+      }
     }
 
     // Check command safety
