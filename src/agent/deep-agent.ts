@@ -19,7 +19,12 @@ import { buildSystemPrompt } from "./system-prompt";
 import { formatTodosForContext, formatScratchpadForContext } from "./state";
 import type { TodoItem, ScratchpadEntry } from "./types";
 import { todoItemSchema } from "./types";
-import { addCacheControl, compactContext, sharedContext } from "./utils";
+import {
+  addCacheControl,
+  compactContext,
+  sharedContext,
+  getSandbox,
+} from "./utils";
 import { gateway } from "../models";
 import { createLocalSandbox, type Sandbox } from "./sandbox";
 
@@ -104,6 +109,14 @@ export const deepAgent = new ToolLoopAgent({
       experimental_context: { sandbox },
     };
   },
+  onFinish: async ({ experimental_context }) => {
+    try {
+      const sandbox = getSandbox(experimental_context);
+      await sandbox.stop();
+    } catch {
+      // Sandbox not available, nothing to clean up
+    }
+  }
 });
 
 export function extractTodosFromStep(
