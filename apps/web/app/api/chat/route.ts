@@ -1,14 +1,15 @@
-import { deepAgent } from "@open-harness/agent";
 import { connectVercelSandbox } from "@open-harness/sandbox";
-import { convertToModelMessages } from "ai";
+import { convertToModelMessages, gateway } from "ai";
 import { nanoid } from "nanoid";
 import { WebAgentUIMessage } from "@/app/types";
+import { webAgent } from "@/app/config";
 import { getUserGitHubToken } from "@/lib/github/user-token";
 import {
   createTaskMessage,
   createTaskMessageIfNotExists,
   getTaskById,
 } from "@/lib/db/tasks";
+import { DEFAULT_MODEL_ID } from "@/lib/models";
 
 import { getServerSession } from "@/lib/session/get-server-session";
 
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
 
   const modelMessages = await convertToModelMessages(messages, {
     ignoreIncompleteToolCalls: true,
-    tools: deepAgent.tools,
+    tools: webAgent.tools,
   });
 
   // Get the GitHub token to pass as env var when reconnecting
@@ -100,11 +101,25 @@ export async function POST(req: Request) {
     }
   }
 
-  const result = await deepAgent.stream({
+  // Resolve model from task's modelId, falling back to default if invalid
+  const modelId = task.modelId ?? DEFAULT_MODEL_ID;
+  let model;
+  try {
+    model = gateway(modelId);
+  } catch (error) {
+    console.error(
+      `Invalid model ID "${modelId}", falling back to default:`,
+      error,
+    );
+    model = gateway(DEFAULT_MODEL_ID);
+  }
+
+  const result = await webAgent.stream({
     messages: modelMessages,
     options: {
       sandbox,
       mode: "interactive",
+      model,
       // TODO: consider enabling approvals for non-cloud-sandbox environments
       approvals: { autoApprove: "all" },
     },

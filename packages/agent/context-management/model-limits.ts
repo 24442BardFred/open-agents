@@ -1,3 +1,5 @@
+import type { LanguageModel } from "ai";
+
 /**
  * Model context window limits in tokens.
  * Used to display context usage percentage.
@@ -10,6 +12,18 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 };
 
 export const DEFAULT_CONTEXT_LIMIT = 200_000;
+
+/**
+ * Get a display label for a model.
+ * Note: LanguageModel from AI SDK is a union type that can be either
+ * a string or a LanguageModelV3 object, hence the type check.
+ */
+export function getModelLabel(model: LanguageModel): string {
+  if (typeof model === "string") {
+    return model;
+  }
+  return model.modelId;
+}
 
 /**
  * Get the context window limit for a model.
