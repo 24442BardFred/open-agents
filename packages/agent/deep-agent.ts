@@ -117,8 +117,8 @@ export const deepAgent = new ToolLoopAgent({
     // Steps contain tool results from this request's execution
     // Messages contain tool results from approval responses (including denials)
 
-    // First, check for denied tools in messages (these override any successful execution)
-    const deniedTools = new Set<string>();
+    // First pass: collect all denied tool IDs and their reasons from tool messages
+    const deniedTools = new Map<string, string | undefined>();
     for (const message of messages) {
       if (message.role === "tool" && Array.isArray(message.content)) {
         for (const part of message.content) {
@@ -129,7 +129,27 @@ export const deepAgent = new ToolLoopAgent({
             "type" in part.output &&
             part.output.type === "execution-denied"
           ) {
-            deniedTools.add(part.toolCallId);
+            const reason =
+              "reason" in part.output ? String(part.output.reason) : undefined;
+            deniedTools.set(part.toolCallId, reason);
+          }
+        }
+      }
+    }
+
+    // Second pass: check if exit_plan_mode was denied
+    let exitPlanModeDenied = false;
+    let exitPlanModeDenialReason: string | undefined;
+    for (const message of messages) {
+      if (message.role === "assistant" && Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (
+            part.type === "tool-call" &&
+            part.toolName === "exit_plan_mode" &&
+            deniedTools.has(part.toolCallId)
+          ) {
+            exitPlanModeDenied = true;
+            exitPlanModeDenialReason = deniedTools.get(part.toolCallId);
           }
         }
       }
@@ -161,7 +181,7 @@ export const deepAgent = new ToolLoopAgent({
       }
     }
 
-    // Check if we should force exit_plan_mode after plan file creation
+    // Check if we should force exit_plan_mode after plan file creation or edit
     let forceExitPlanMode = false;
     if (agentMode === "plan" && planFilePath) {
       const lastStepForPlanCheck = steps[steps.length - 1];
@@ -171,16 +191,35 @@ export const deepAgent = new ToolLoopAgent({
       ) {
         for (const result of lastStepForPlanCheck.toolResults) {
           if (deniedTools.has(result.toolCallId)) continue;
+          // Check for write to plan file
           if (
             !result.dynamic &&
             result.toolName === "write" &&
             result.output?.success === true
           ) {
-            // Find matching tool call with proper type narrowing
             for (const tc of lastStepForPlanCheck.toolCalls) {
               if (
                 !tc.dynamic &&
                 tc.toolName === "write" &&
+                tc.toolCallId === result.toolCallId &&
+                tc.input.filePath === planFilePath
+              ) {
+                forceExitPlanMode = true;
+                break;
+              }
+            }
+            if (forceExitPlanMode) break;
+          }
+          // Check for edit to plan file
+          if (
+            !result.dynamic &&
+            result.toolName === "edit" &&
+            result.output?.success === true
+          ) {
+            for (const tc of lastStepForPlanCheck.toolCalls) {
+              if (
+                !tc.dynamic &&
+                tc.toolName === "edit" &&
                 tc.toolCallId === result.toolCallId &&
                 tc.input.filePath === planFilePath
               ) {
@@ -205,7 +244,7 @@ export const deepAgent = new ToolLoopAgent({
         >)
       : ([...baseActiveTools] as Array<keyof typeof tools>);
 
-    // Rebuild instructions if mode changed
+    // Rebuild instructions if mode changed or if exit_plan_mode was denied
     let instructions: string | undefined;
     if (modeChanged) {
       const mode =
@@ -221,9 +260,36 @@ export const deepAgent = new ToolLoopAgent({
       });
     }
 
+    // Inject a clear reminder when exit_plan_mode was denied
+    // This helps the model understand it did NOT exit and should revise the plan
+    let planDenialReminder: string | undefined;
+    if (exitPlanModeDenied && agentMode === "plan") {
+      const feedbackPart = exitPlanModeDenialReason
+        ? `\n\nUser feedback: "${exitPlanModeDenialReason}"`
+        : "";
+      planDenialReminder = `<system-reminder>
+## Plan Rejected
+
+Your plan was NOT approved. You are STILL in plan mode and have NOT exited.
+
+Do NOT say you "exited plan mode" - you did not exit. The user rejected your plan.
+
+Please revise your plan based on the user's feedback and call \`exit_plan_mode\` again when ready.${feedbackPart}
+</system-reminder>`;
+    }
+
+    // Build the final messages, adding plan denial reminder if needed
+    const compactedMessages = compactContext({ messages, steps });
+    const finalMessages = planDenialReminder
+      ? [
+          ...compactedMessages,
+          { role: "user" as const, content: planDenialReminder },
+        ]
+      : compactedMessages;
+
     return {
       messages: addCacheControl({
-        messages: compactContext({ messages, steps }),
+        messages: finalMessages,
         model,
       }),
       activeTools: [...activeToolNames],
