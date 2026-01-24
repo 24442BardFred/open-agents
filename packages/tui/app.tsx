@@ -807,7 +807,7 @@ function AppContent({ options }: AppProps) {
   );
 
   const handleClearAndImplementPlan = useCallback(
-    (planPath: string) => {
+    (planPath: string, planContent: string) => {
       // 1. Clear the chat (like /new)
       setMessages([]);
       setSessionId(null);
@@ -816,9 +816,11 @@ function AppContent({ options }: AppProps) {
       // 2. Set permission mode to "edits" (auto-accept edits)
       setPermissionMode("edits");
 
-      // 3. Send a new message to implement the plan
+      // 3. Send a new message to implement the plan with embedded content
       setTimeout(() => {
-        sendMessage({ text: `implement the plan at ${planPath}` });
+        sendMessage({
+          text: `Implement the following plan:\n\n${planContent}`,
+        });
       }, 0);
     },
     [setMessages, setSessionId, resetUsage, setPermissionMode, sendMessage],

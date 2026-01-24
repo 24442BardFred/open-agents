@@ -8,7 +8,7 @@ import { renderMarkdown } from "../lib/markdown";
 export type PlanApprovalPanelProps = {
   approvalId: string;
   planFilePath: string;
-  onClearAndImplement?: (planFilePath: string) => void;
+  onClearAndImplement?: (planFilePath: string, planContent: string) => void;
 };
 
 export function PlanApprovalPanel({
@@ -57,8 +57,8 @@ export function PlanApprovalPanel({
 
     // Shift+Tab shortcut for option 0 (clear context and implement)
     if (key.shift && key.tab) {
-      if (onClearAndImplement) {
-        onClearAndImplement(planFilePath);
+      if (onClearAndImplement && plan) {
+        onClearAndImplement(planFilePath, plan);
       }
       return;
     }
@@ -95,8 +95,8 @@ export function PlanApprovalPanel({
     if (key.return) {
       if (selected === 0) {
         // Yes, clear context and auto-accept edits
-        if (onClearAndImplement) {
-          onClearAndImplement(planFilePath);
+        if (onClearAndImplement && plan) {
+          onClearAndImplement(planFilePath, plan);
         }
       } else if (selected === 1) {
         // Yes, auto-accept edits
