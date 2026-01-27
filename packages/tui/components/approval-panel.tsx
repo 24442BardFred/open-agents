@@ -38,6 +38,18 @@ export function ApprovalPanel({
     if (!toolPart) return null;
     return inferApprovalRule(toolPart, state.workingDirectory);
   }, [toolPart, state.workingDirectory]);
+
+  // For skill tools, look up the actual skill description
+  const effectiveDescription = useMemo(() => {
+    if (toolPart?.type === "tool-skill") {
+      const skillName = String(toolPart.input?.skill ?? "");
+      const skill = state.skills.find((s) => s.name === skillName);
+      if (skill?.description) {
+        return skill.description;
+      }
+    }
+    return toolDescription;
+  }, [toolPart, state.skills, toolDescription]);
   // Determine available options based on whether a rule can be inferred
   const canSaveRule = inferredRule !== null;
 
@@ -156,7 +168,9 @@ export function ApprovalPanel({
       {/* Command and description */}
       <Box flexDirection="column" marginTop={1} marginLeft={2}>
         <Text>{toolCommand}</Text>
-        {toolDescription && <Text color="gray">{toolDescription}</Text>}
+        {effectiveDescription && (
+          <Text color="gray">{effectiveDescription}</Text>
+        )}
       </Box>
 
       {/* Code preview for new files */}
