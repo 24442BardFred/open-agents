@@ -10,7 +10,8 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { DefaultChatTransport, isToolUIPart } from "ai";
+import { isToolUIPart } from "ai";
+import { AbortableChatTransport } from "@/lib/abortable-chat-transport";
 import { useChat, type UseChatHelpers } from "@ai-sdk/react";
 import { useSWRConfig } from "swr";
 import type { WebAgentUIMessage } from "@/app/types";
@@ -228,7 +229,7 @@ export function SessionChatProvider({
 
   const transport = useMemo(
     () =>
-      new DefaultChatTransport({
+      new AbortableChatTransport({
         api: "/api/chat",
         body: () => ({
           sessionId: sessionRecord.id,
@@ -269,14 +270,19 @@ export function SessionChatProvider({
   // Cleanup: always release chat instances when leaving a route.
   // If this chat is still streaming, stop the local stream processing so
   // background chats do not consume render/CPU budget in this tab.
+  // Also abort the transport's fetch connections — the SDK's reconnectToStream
+  // does not pass an abort signal, so chatInstance.stop() alone cannot cancel
+  // resumed streams. Without this, navigating away from a resumed chat leaves
+  // an immortal stream consumer on the main thread.
   useEffect(() => {
     return () => {
       if (chatInstance.status === "streaming") {
         chatInstance.stop();
       }
+      transport.abort();
       removeChatInstance(chatInfo.id);
     };
-  }, [chatInfo.id, chatInstance]);
+  }, [chatInfo.id, chatInstance, transport]);
 
   const [sandboxInfo, setSandboxInfoState] = useState<SandboxInfo | null>(
     () => sandboxInfoCache.get(sessionId) ?? null,
