@@ -253,7 +253,8 @@ export function SharedChatContent({
                                       disabled={p.text.trim().length === 0}
                                       aria-label="Copy assistant message"
                                     >
-                                      {copiedAssistantMessageKey === `${m.id}-${i}` ? (
+                                      {copiedAssistantMessageKey ===
+                                      `${m.id}-${i}` ? (
                                         <>
                                           <Check className="mr-1 h-3.5 w-3.5" />
                                           Copied
