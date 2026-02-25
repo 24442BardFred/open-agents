@@ -20,6 +20,7 @@ export const callOptionsSchema = z.object({
   modelConfig: modelConfigSchema.optional(),
   subagentModelConfig: modelConfigSchema.optional(),
   customInstructions: z.string().optional(),
+  executionMode: z.enum(["normal", "durable"]).optional(),
   skills: z.custom<SkillMetadata[]>().optional(),
 });
 

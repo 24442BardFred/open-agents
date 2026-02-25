@@ -1,4 +1,5 @@
-import { getChatById, getSessionById } from "@/lib/db/sessions";
+import { getRun } from "workflow/api";
+import { getChatById, getSessionById, updateChatActiveStreamId } from "@/lib/db/sessions";
 import { createRedisClient } from "@/lib/redis";
 import { getServerSession } from "@/lib/session/get-server-session";
 
@@ -25,7 +26,29 @@ export async function POST(_request: Request, context: RouteContext) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Publish stop signal via Redis pub/sub
+  const activeStreamId = chat.activeStreamId;
+  if (!activeStreamId) {
+    return Response.json({ success: true });
+  }
+
+  const firstSeparator = activeStreamId.indexOf(":");
+  const secondSeparator = activeStreamId.indexOf(":", firstSeparator + 1);
+  const workflowRunId =
+    firstSeparator >= 0 && secondSeparator > firstSeparator
+      ? activeStreamId.slice(firstSeparator + 1, secondSeparator)
+      : null;
+
+  if (workflowRunId) {
+    try {
+      await getRun(workflowRunId).cancel();
+      await updateChatActiveStreamId(chatId, null);
+      return Response.json({ success: true });
+    } catch (error) {
+      console.error("Failed to cancel workflow run, falling back to stop signal:", error);
+    }
+  }
+
+  // Backward-compatible fallback for non-workflow streams.
   const publisher = createRedisClient();
   await publisher.publish(`stop:${chatId}`, "stop");
   publisher.disconnect();

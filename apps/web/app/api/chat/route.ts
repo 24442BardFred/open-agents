@@ -10,10 +10,16 @@ import { connectSandbox, type SandboxState } from "@open-harness/sandbox";
 import { DEFAULT_SANDBOX_PORTS } from "@/lib/sandbox/config";
 import {
   convertToModelMessages,
+  createUIMessageStreamResponse,
   type GatewayModelId,
   type LanguageModelUsage,
+  type UIMessageChunk,
 } from "ai";
+import { after } from "next/server";
 import { nanoid } from "nanoid";
+import { start } from "workflow/api";
+import type { ChatWorkflowResult } from "@/app/workflows/chat";
+import { runDurableChatWorkflow } from "@/app/workflows/chat";
 import { webAgent } from "@/app/config";
 import type { WebAgentUIMessage } from "@/app/types";
 import {
@@ -36,7 +42,6 @@ import { resumableStreamContext } from "@/lib/resumable-stream-context";
 import { buildActiveLifecycleUpdate } from "@/lib/sandbox/lifecycle";
 import { isSandboxActive } from "@/lib/sandbox/utils";
 import { getServerSession } from "@/lib/session/get-server-session";
-import { onStopSignal } from "@/lib/stop-signal";
 
 const cachedInputTokensFor = (usage: LanguageModelUsage) =>
   usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
@@ -58,8 +63,8 @@ const discoveredSkillsCache = new Map<
 >();
 const remoteAuthFingerprintBySessionId = new Map<string, string>();
 
-const createStreamToken = (startedAtMs: number) =>
-  `${startedAtMs}${STREAM_TOKEN_SEPARATOR}${nanoid()}`;
+const createStreamToken = (startedAtMs: number, runId: string) =>
+  `${startedAtMs}${STREAM_TOKEN_SEPARATOR}${runId}${STREAM_TOKEN_SEPARATOR}${nanoid()}`;
 
 const getRemoteAuthFingerprint = (authUrl: string) =>
   createHash("sha256").update(authUrl).digest("hex");
@@ -226,9 +231,13 @@ export async function POST(req: Request) {
     });
   }
 
-  let ownedStreamToken = createStreamToken(requestStartedAtMs);
+  let ownedStreamToken: string | null = null;
 
   const claimStreamOwnership = async () => {
+    if (!ownedStreamToken) {
+      return false;
+    }
+
     // Retry once if another request updates activeStreamId between our read and CAS.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const latestChat = await getChatById(chatId);
@@ -335,34 +344,9 @@ export async function POST(req: Request) {
     console.error("Failed to resolve subagent model preference:", error);
   }
 
-  // Use Redis stop signals as the sole cancellation mechanism for generation.
-  // We intentionally do not bind `req.signal` so a transient client disconnect
-  // does not cancel work; clients can reconnect via resumable streams.
-  const controller = new AbortController();
-  const unsubscribeStop = await onStopSignal(chatId, () => {
-    controller.abort();
-  });
-
-  // Abort gracefully before the platform kills the function at maxDuration,
-  // so that onFinish fires and we persist the partial response.
-  const PRE_TIMEOUT_MS = 730_000;
-  const timeoutHandle = setTimeout(() => {
-    console.warn("[chat] Aborting before maxDuration timeout");
-    controller.abort();
-  }, PRE_TIMEOUT_MS);
-
-  let stopSignalClosed = false;
-  const closeStopSignal = () => {
-    if (stopSignalClosed) {
-      return;
-    }
-    stopSignalClosed = true;
-    unsubscribeStop();
-  };
-
   let streamTokenCleared = false;
   const clearOwnedStreamToken = async () => {
-    if (streamTokenCleared) {
+    if (streamTokenCleared || !ownedStreamToken) {
       return false;
     }
     streamTokenCleared = true;
@@ -378,71 +362,190 @@ export async function POST(req: Request) {
     }
   };
 
-  let result;
+  const agentCallOptions = {
+    sandboxConfig: createSandboxConfigFromInstance(sandbox),
+    modelConfig: { modelId: resolvedModelId },
+    ...(subagentModelId && {
+      subagentModelConfig: { modelId: subagentModelId },
+    }),
+    approval: {
+      type: "interactive" as const,
+      autoApprove: "all" as const,
+      sessionRules: [],
+    },
+    ...(skills.length > 0 && { skills }),
+  };
+
+  let run;
   try {
-    result = await webAgent.stream({
-      messages: modelMessages,
-      options: {
-        sandboxConfig: createSandboxConfigFromInstance(sandbox),
-        modelConfig: { modelId: resolvedModelId },
-        ...(subagentModelId && {
-          subagentModelConfig: { modelId: subagentModelId },
-        }),
-        // TODO: consider enabling approvals for non-cloud-sandbox environments
-        approval: {
-          type: "interactive",
-          autoApprove: "all",
-          sessionRules: [],
-        },
-        ...(skills.length > 0 && { skills }),
+    run = await start(runDurableChatWorkflow, [
+      modelMessages,
+      {
+        ...agentCallOptions,
+        executionMode: "durable" as const,
       },
-      abortSignal: controller.signal,
-    });
+    ]);
+    ownedStreamToken = createStreamToken(requestStartedAtMs, run.runId);
   } catch (error) {
-    clearTimeout(timeoutHandle);
-    closeStopSignal();
     await clearOwnedStreamToken();
     throw error;
   }
 
-  void result.consumeStream().then(
-    () => {
-      clearTimeout(timeoutHandle);
-      closeStopSignal();
-    },
-    async () => {
-      clearTimeout(timeoutHandle);
-      closeStopSignal();
+  after(async () => {
+    let workflowResult: ChatWorkflowResult;
+    try {
+      workflowResult = await run.returnValue;
+    } catch (error) {
+      console.error("Durable chat workflow failed:", error);
       await clearOwnedStreamToken();
-    },
-  );
+      return;
+    }
 
-  // Track last step usage for message metadata
-  let lastStepUsage: LanguageModelUsage | undefined;
-  let totalMessageUsage: LanguageModelUsage | undefined;
+    const stillOwnsStream = await clearOwnedStreamToken();
+    if (!stillOwnsStream) {
+      return;
+    }
 
-  // Save assistant message on finish, and persist sandbox state if applicable
-  return result.toUIMessageStreamResponse({
-    originalMessages: messages,
-    generateMessageId: nanoid,
-    messageMetadata: ({ part }) => {
-      // Track per-step usage from finish-step events. The last step's input
-      // tokens represents actual context window utilization.
-      if (part.type === "finish-step") {
-        lastStepUsage = part.usage;
-        return { lastStepUsage, totalMessageUsage: undefined };
+    const activityAt = new Date();
+    const responseMessage =
+      workflowResult.responseMessage as WebAgentUIMessage | null;
+    const totalMessageUsage = workflowResult.totalMessageUsage;
+
+    if (responseMessage) {
+      // Save assistant message (upsert to handle tool results added client-side)
+      try {
+        const upsertResult = await upsertChatMessageScoped({
+          id: responseMessage.id,
+          chatId,
+          role: "assistant",
+          parts: responseMessage,
+        });
+        if (upsertResult.status === "conflict") {
+          console.warn(
+            `Skipped assistant onFinish upsert due to ID scope conflict: ${responseMessage.id}`,
+          );
+        } else if (upsertResult.status === "inserted") {
+          await updateChatAssistantActivity(chatId, activityAt);
+        }
+      } catch (error) {
+        console.error("Failed to save assistant message:", error);
       }
-      // On finish, include both the last step usage and total message usage
-      if (part.type === "finish") {
-        totalMessageUsage = part.totalUsage;
-        return { lastStepUsage, totalMessageUsage: part.totalUsage };
+    }
+
+    // Persist sandbox state
+    // For hybrid sandboxes, we need to be careful not to overwrite the sandboxId
+    // that may have been set by background work (the onCloudSandboxReady hook)
+    if (sandbox.getState) {
+      try {
+        const currentState = sandbox.getState() as SandboxState;
+        let sandboxStateToPersist = currentState;
+
+        // For hybrid sandboxes in pre-handoff state (has files, no sandboxId),
+        // check if background work has already set a sandboxId we should preserve
+        if (
+          currentState.type === "hybrid" &&
+          "files" in currentState &&
+          !currentState.sandboxId
+        ) {
+          const currentSession = await getSessionById(sessionId);
+          if (
+            currentSession?.sandboxState?.type === "hybrid" &&
+            currentSession.sandboxState.sandboxId
+          ) {
+            // Background work has completed - use the sandboxId from DB
+            // but also include pending operations from this session
+            sandboxStateToPersist = {
+              type: "hybrid",
+              sandboxId: currentSession.sandboxState.sandboxId,
+              pendingOperations:
+                "pendingOperations" in currentState
+                  ? currentState.pendingOperations
+                  : undefined,
+            };
+          }
+        }
+
+        await updateSession(sessionId, {
+          sandboxState: sandboxStateToPersist,
+          ...buildActiveLifecycleUpdate(sandboxStateToPersist, {
+            activityAt,
+          }),
+        });
+      } catch (error) {
+        console.error("Failed to persist sandbox state:", error);
+        // Even if sandbox state persistence fails, keep activity timestamps current.
+        try {
+          await updateSession(sessionId, {
+            ...buildActiveLifecycleUpdate(sessionRecord.sandboxState, {
+              activityAt,
+            }),
+          });
+        } catch (activityError) {
+          console.error("Failed to persist lifecycle activity:", activityError);
+        }
       }
-      return undefined;
-    },
+    }
+
+    if (!responseMessage) {
+      return;
+    }
+
+    const postUsage = (
+      usage: LanguageModelUsage,
+      usageModel: string,
+      agentType: "main" | "subagent",
+      messages: WebAgentUIMessage[] = [],
+    ) => {
+      void recordUsage(session.user.id, {
+        source: "web",
+        agentType,
+        model: usageModel,
+        messages,
+        usage: {
+          inputTokens: usage.inputTokens ?? 0,
+          cachedInputTokens: cachedInputTokensFor(usage),
+          outputTokens: usage.outputTokens ?? 0,
+        },
+      }).catch((e) => console.error("Failed to record usage:", e));
+    };
+
+    if (totalMessageUsage) {
+      postUsage(totalMessageUsage, resolvedModelId, "main", [responseMessage]);
+    }
+
+    const subagentUsageEvents = collectTaskToolUsageEvents(responseMessage);
+    if (subagentUsageEvents.length === 0) {
+      return;
+    }
+
+    const defaultModelId = resolvedModelId;
+    const subagentUsageByModel = new Map<string, LanguageModelUsage>();
+    for (const event of subagentUsageEvents) {
+      const eventModelId = event.modelId ?? defaultModelId;
+      if (!eventModelId) {
+        continue;
+      }
+      const existing = subagentUsageByModel.get(eventModelId);
+      const combined = sumLanguageModelUsage(existing, event.usage);
+      if (combined) {
+        subagentUsageByModel.set(eventModelId, combined);
+      }
+    }
+
+    for (const [eventModelId, usage] of subagentUsageByModel) {
+      postUsage(usage, eventModelId, "subagent");
+    }
+  });
+
+  return createUIMessageStreamResponse({
+    stream: run.getReadable<UIMessageChunk>(),
     async consumeSseStream({ stream }) {
-      await resumableStreamContext.createNewResumableStream(
-        ownedStreamToken,
-        () => stream,
+      if (!ownedStreamToken) {
+        return;
+      }
+
+      await resumableStreamContext.createNewResumableStream(ownedStreamToken, () =>
+        stream,
       );
 
       const claimed = await claimStreamOwnership();
@@ -470,143 +573,6 @@ export async function POST(req: Request) {
         }
       } catch (error) {
         console.error("Failed to save latest chat message:", error);
-      }
-    },
-    onFinish: async ({ responseMessage }) => {
-      clearTimeout(timeoutHandle);
-      if (chatId) {
-        closeStopSignal();
-        const stillOwnsStream = await clearOwnedStreamToken();
-
-        if (!stillOwnsStream) {
-          return;
-        }
-
-        const activityAt = new Date();
-
-        // Save assistant message (upsert to handle tool results added client-side)
-        try {
-          const upsertResult = await upsertChatMessageScoped({
-            id: responseMessage.id,
-            chatId,
-            role: "assistant",
-            parts: responseMessage,
-          });
-          if (upsertResult.status === "conflict") {
-            console.warn(
-              `Skipped assistant onFinish upsert due to ID scope conflict: ${responseMessage.id}`,
-            );
-          } else if (upsertResult.status === "inserted") {
-            await updateChatAssistantActivity(chatId, activityAt);
-          }
-        } catch (error) {
-          console.error("Failed to save assistant message:", error);
-        }
-
-        // Persist sandbox state
-        // For hybrid sandboxes, we need to be careful not to overwrite the sandboxId
-        // that may have been set by background work (the onCloudSandboxReady hook)
-        if (sandbox.getState) {
-          try {
-            const currentState = sandbox.getState() as SandboxState;
-            let sandboxStateToPersist = currentState;
-
-            // For hybrid sandboxes in pre-handoff state (has files, no sandboxId),
-            // check if background work has already set a sandboxId we should preserve
-            if (
-              currentState.type === "hybrid" &&
-              "files" in currentState &&
-              !currentState.sandboxId
-            ) {
-              const currentSession = await getSessionById(sessionId);
-              if (
-                currentSession?.sandboxState?.type === "hybrid" &&
-                currentSession.sandboxState.sandboxId
-              ) {
-                // Background work has completed - use the sandboxId from DB
-                // but also include pending operations from this session
-                sandboxStateToPersist = {
-                  type: "hybrid",
-                  sandboxId: currentSession.sandboxState.sandboxId,
-                  pendingOperations:
-                    "pendingOperations" in currentState
-                      ? currentState.pendingOperations
-                      : undefined,
-                };
-              }
-            }
-
-            await updateSession(sessionId, {
-              sandboxState: sandboxStateToPersist,
-              ...buildActiveLifecycleUpdate(sandboxStateToPersist, {
-                activityAt,
-              }),
-            });
-          } catch (error) {
-            console.error("Failed to persist sandbox state:", error);
-            // Even if sandbox state persistence fails, keep activity timestamps current.
-            try {
-              await updateSession(sessionId, {
-                ...buildActiveLifecycleUpdate(sessionRecord.sandboxState, {
-                  activityAt,
-                }),
-              });
-            } catch (activityError) {
-              console.error(
-                "Failed to persist lifecycle activity:",
-                activityError,
-              );
-            }
-          }
-        }
-
-        const postUsage = (
-          usage: LanguageModelUsage,
-          usageModel: string,
-          agentType: "main" | "subagent",
-          messages: WebAgentUIMessage[] = [],
-        ) => {
-          void recordUsage(session.user.id, {
-            source: "web",
-            agentType,
-            model: usageModel,
-            messages,
-            usage: {
-              inputTokens: usage.inputTokens ?? 0,
-              cachedInputTokens: cachedInputTokensFor(usage),
-              outputTokens: usage.outputTokens ?? 0,
-            },
-          }).catch((e) => console.error("Failed to record usage:", e));
-        };
-
-        if (totalMessageUsage) {
-          postUsage(totalMessageUsage, resolvedModelId, "main", [
-            responseMessage,
-          ]);
-        }
-
-        const subagentUsageEvents = collectTaskToolUsageEvents(responseMessage);
-        if (subagentUsageEvents.length === 0) {
-          return;
-        }
-
-        const defaultModelId = resolvedModelId;
-        const subagentUsageByModel = new Map<string, LanguageModelUsage>();
-        for (const event of subagentUsageEvents) {
-          const eventModelId = event.modelId ?? defaultModelId;
-          if (!eventModelId) {
-            continue;
-          }
-          const existing = subagentUsageByModel.get(eventModelId);
-          const combined = sumLanguageModelUsage(existing, event.usage);
-          if (combined) {
-            subagentUsageByModel.set(eventModelId, combined);
-          }
-        }
-
-        for (const [eventModelId, usage] of subagentUsageByModel) {
-          postUsage(usage, eventModelId, "subagent");
-        }
       }
     },
   });

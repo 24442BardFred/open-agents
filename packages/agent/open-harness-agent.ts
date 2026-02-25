@@ -88,6 +88,8 @@ export const openHarnessAgent = new ToolLoopAgent({
     return {
       ...settings,
       model: callModel,
+      stopWhen:
+        options.executionMode === "durable" ? stepCountIs(1) : settings.stopWhen,
       tools: addCacheControl({
         tools: settings.tools ?? tools,
         model: callModel,
