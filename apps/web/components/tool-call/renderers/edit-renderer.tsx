@@ -3,6 +3,7 @@
 import { toRelativePath } from "@open-harness/shared/lib/tool-state";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import { Loader2 } from "lucide-react";
+import { useState } from "react";
 import type { ToolRendererProps } from "@/app/lib/render-tool";
 import { defaultDiffOptions } from "@/lib/diffs-config";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ export function EditRenderer({
   onApprove,
   onDeny,
 }: ToolRendererProps<"tool-edit">) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const input = part.input;
   const rawFilePath = input?.filePath ?? "...";
   const filePath =
@@ -83,12 +85,22 @@ export function EditRenderer({
         )}
 
       {showDiff && !mergedState.approvalRequested && !mergedState.denied && (
-        <div className="ml-5 mt-2 max-h-96 overflow-auto">
-          <MultiFileDiff
-            oldFile={{ name: rawFilePath, contents: oldString }}
-            newFile={{ name: rawFilePath, contents: newString }}
-            options={defaultDiffOptions}
-          />
+        <div className="ml-5 mt-2 space-y-2">
+          <div className={cn(!isExpanded && "max-h-96 overflow-auto")}>
+            <MultiFileDiff
+              oldFile={{ name: rawFilePath, contents: oldString }}
+              newFile={{ name: rawFilePath, contents: newString }}
+              options={defaultDiffOptions}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsExpanded((current) => !current)}
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {isExpanded ? "Collapse diff" : "Expand to full diff"}
+          </button>
         </div>
       )}
 
