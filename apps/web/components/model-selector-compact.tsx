@@ -24,15 +24,15 @@ import {
 
 interface ModelSelectorCompactProps {
   value: string;
-  models: AvailableModel[];
-  isLoading: boolean;
+  models?: AvailableModel[];
+  isLoading?: boolean;
   onChange: (modelId: string) => void;
 }
 
 export function ModelSelectorCompact({
   value,
-  models,
-  isLoading,
+  models = [],
+  isLoading = false,
   onChange,
 }: ModelSelectorCompactProps) {
   const [open, setOpen] = useState(false);

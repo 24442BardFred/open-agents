@@ -112,7 +112,7 @@ export default async function SessionChatPage({
         initialMessages={initialMessages}
         initialModels={initialModels}
       >
-        <SessionChatContent initialModels={initialModels} />
+        <SessionChatContent />
       </SessionChatProvider>
     </DiffsProvider>
   );
