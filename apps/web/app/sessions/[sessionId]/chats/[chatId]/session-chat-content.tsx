@@ -37,16 +37,13 @@ import useSWR from "swr";
 import type {
   WebAgentUIMessage,
   WebAgentUIMessagePart,
-  WebAgentUIToolPart,
 } from "@/app/types";
 import { FileSuggestionsDropdown } from "@/components/file-suggestions-dropdown";
 import { ImageAttachmentsPreview } from "@/components/image-attachments-preview";
 import { ModelSelectorCompact } from "@/components/model-selector-compact";
 import { QuestionPanel } from "@/components/question-panel";
 import { SlashCommandDropdown } from "@/components/slash-command-dropdown";
-import { TaskGroupView } from "@/components/task-group-view";
-import { ThinkingBlock } from "@/components/thinking-block";
-import { ToolCall } from "@/components/tool-call";
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -702,7 +699,7 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
 
     const computedStyle = getComputedStyle(textarea);
     const lineHeight = parseFloat(computedStyle.lineHeight) || 24;
-    const maxLines = 3;
+    const maxLines = 8;
     const maxHeight = lineHeight * maxLines;
 
     // Store current height to avoid flicker
@@ -776,7 +773,6 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
     error,
     sendMessage,
     status,
-    addToolApprovalResponse,
     addToolOutput,
   } = chat;
   const {
@@ -985,61 +981,32 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
       };
     });
   }, [renderMessages, isChatInFlightSettled]);
-  const handleToolApprove = useCallback(
-    (id: string) => {
-      addToolApprovalResponse({ id, approved: true });
-    },
-    [addToolApprovalResponse],
-  );
-  const handleToolDeny = useCallback(
-    (id: string, reason?: string) => {
-      addToolApprovalResponse({
-        id,
-        approved: false,
-        reason,
-      });
-    },
-    [addToolApprovalResponse],
-  );
   const renderedMessageGroups = useMemo(
     () =>
       groupedRenderMessages.map(
         ({ message: m, groups, isStreaming: isMessageStreaming }) => {
           return groups.map((group) => {
+            // Hide task groups entirely — inbox mode
             if (group.type === "task-group") {
-              return (
-                <div key={`${m.id}-${group.renderKey}`} className="max-w-full">
-                  <TaskGroupView
-                    taskParts={group.tasks}
-                    activeApprovalId={
-                      group.tasks.find((t) => t.state === "approval-requested")
-                        ?.approval?.id ?? null
-                    }
-                    isStreaming={isMessageStreaming}
-                    onApprove={handleToolApprove}
-                    onDeny={handleToolDeny}
-                  />
-                </div>
-              );
+              return null;
             }
 
             const p = group.part;
 
+            // Hide reasoning/thinking blocks
             if (isReasoningUIPart(p)) {
-              return (
-                <div
-                  key={`${m.id}-${group.renderKey}`}
-                  className="flex justify-start"
-                >
-                  <ThinkingBlock
-                    text={p.text}
-                    isStreaming={isMessageStreaming && p.state === "streaming"}
-                  />
-                </div>
-              );
+              return null;
+            }
+
+            // Hide all tool calls — inbox mode
+            if (isToolUIPart(p)) {
+              return null;
             }
 
             if (p.type === "text") {
+              // Skip empty text parts (can happen when agent only did tool calls)
+              if (!p.text.trim()) return null;
+
               return (
                 <div
                   key={`${m.id}-${group.renderKey}`}
@@ -1049,8 +1016,8 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                   )}
                 >
                   {m.role === "user" ? (
-                    <div className="min-w-0 max-w-[80%] rounded-3xl bg-secondary px-4 py-2">
-                      <p className="whitespace-pre-wrap break-words">
+                    <div className="min-w-0 max-w-[80%] rounded-2xl bg-secondary px-4 py-3">
+                      <p className="whitespace-pre-wrap break-words text-sm">
                         {p.text}
                       </p>
                     </div>
@@ -1074,20 +1041,7 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
               );
             }
 
-            if (isToolUIPart(p)) {
-              return (
-                <div key={`${m.id}-${group.renderKey}`} className="max-w-full">
-                  <ToolCall
-                    part={p as WebAgentUIToolPart}
-                    isStreaming={isMessageStreaming}
-                    onApprove={handleToolApprove}
-                    onDeny={handleToolDeny}
-                  />
-                </div>
-              );
-            }
-
-            // Render image attachments
+            // Render image attachments from user
             if (p.type === "file" && p.mediaType?.startsWith("image/")) {
               return (
                 <div
@@ -1110,7 +1064,7 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
           });
         },
       ),
-    [groupedRenderMessages, handleToolApprove, handleToolDeny],
+    [groupedRenderMessages],
   );
   const [isUpdatingModel, setIsUpdatingModel] = useState(false);
   const lastStatusSyncAtRef = useRef(0);
@@ -2361,8 +2315,9 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
             <div className="space-y-6">
               {renderedMessageGroups}
               {showThinkingIndicator && (
-                <div className="flex justify-start">
-                  <ThinkingBlock text="" isStreaming />
+                <div className="flex items-center gap-2 py-2">
+                  <span className="h-2 w-2 rounded-full bg-foreground/50 animate-pulse" />
+                  <span className="text-xs text-muted-foreground">Working...</span>
                 </div>
               )}
             </div>
@@ -2389,8 +2344,8 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
         />
       )}
 
-      {/* Input */}
-      <div className="p-4 pb-2 sm:pb-8">
+      {/* Compose — Gmail-style */}
+      <div className="border-t border-border bg-background p-4 pb-2 sm:pb-6">
         <div className="mx-auto max-w-4xl space-y-2">
           {restoreError && (
             <div className="flex items-center justify-between rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -2514,7 +2469,7 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                   addImages(files);
                 }
               }}
-              className={`overflow-hidden rounded-2xl bg-muted transition-colors ${isDragging ? "ring-2 ring-blue-500/50" : ""}`}
+              className={`overflow-hidden rounded-xl border border-border bg-background shadow-sm transition-colors focus-within:border-foreground/20 focus-within:shadow-md ${isDragging ? "ring-2 ring-blue-500/50" : ""}`}
             >
               {/* Sandbox overlay when inactive */}
               <SandboxInputOverlay
@@ -2534,13 +2489,13 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
               {/* Image attachments preview */}
               <ImageAttachmentsPreview images={images} onRemove={removeImage} />
 
-              {/* Textarea area */}
-              <div className="px-4 pb-2 pt-3">
+              {/* Compose body */}
+              <div className="px-4 pb-2 pt-4">
                 <textarea
                   ref={inputRef}
                   value={input}
-                  placeholder="Request changes or ask a question..."
-                  rows={1}
+                  placeholder="Send a message..."
+                  rows={3}
                   onChange={(e) => {
                     setInput(e.currentTarget.value);
                     setCursorPosition(e.currentTarget.selectionStart ?? 0);
@@ -2583,14 +2538,14 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                     }
                   }}
                   disabled={isArchived || isChatInFlight}
-                  className="w-full resize-none overflow-y-auto bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none"
-                  style={{ minHeight: "24px" }}
+                  className="w-full resize-none overflow-y-auto bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  style={{ minHeight: "72px" }}
                 />
               </div>
 
-              {/* Bottom toolbar */}
-              <div className="flex items-center justify-between px-3 pb-2">
-                <div className="flex items-center gap-2">
+              {/* Compose toolbar */}
+              <div className="flex items-center justify-between border-t border-border/50 px-3 py-2">
+                <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant="ghost"
@@ -2600,6 +2555,27 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                     className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
                   >
                     <Paperclip className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleMicClick}
+                    disabled={isArchived || recordingState === "processing"}
+                    className={`relative h-8 w-8 rounded-full ${
+                      recordingState === "recording"
+                        ? "text-red-500"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {recordingState === "recording" && (
+                      <span className="absolute inset-0 animate-pulse rounded-full bg-red-500/30" />
+                    )}
+                    {recordingState === "processing" ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <Mic className="h-5 w-5" />
+                    )}
                   </Button>
                   {renderMessages.length === 0 && chatInfo.modelId ? (
                     <div
@@ -2632,33 +2608,12 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                   />
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleMicClick}
-                    disabled={isArchived || recordingState === "processing"}
-                    className={`relative h-8 w-8 rounded-full ${
-                      recordingState === "recording"
-                        ? "text-red-500"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {recordingState === "recording" && (
-                      <span className="absolute inset-0 animate-pulse rounded-full bg-red-500/30" />
-                    )}
-                    {recordingState === "processing" ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <Mic className="h-5 w-5" />
-                    )}
-                  </Button>
-
+                <div className="flex items-center gap-2">
                   {isChatInFlight || hasPendingResponse ? (
                     <Button
                       type="button"
-                      size="icon"
+                      size="sm"
+                      variant="destructive"
                       onClick={() => {
                         fetch(`/api/chat/${chatInfo.id}/stop`, {
                           method: "POST",
@@ -2666,10 +2621,11 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                         stopChatStream();
                         setHasPendingResponse(false);
                       }}
-                      className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      className="gap-1.5"
                       style={{ touchAction: "manipulation" }}
                     >
                       <Square className="h-3 w-3 fill-current" />
+                      Stop
                     </Button>
                   ) : (
                     <Tooltip>
@@ -2677,11 +2633,8 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                         <span>
                           <Button
                             type="submit"
-                            size="icon"
+                            size="sm"
                             onTouchEnd={() => {
-                              // On iOS, tapping submit while the textarea is focused
-                              // causes the keyboard to briefly flash open then closed.
-                              // Blur the textarea immediately to prevent this.
                               inputRef.current?.blur();
                             }}
                             disabled={
@@ -2691,9 +2644,10 @@ export function SessionChatContent({ initialModels }: SessionChatContentProps) {
                               isUpdatingModel ||
                               !isSandboxActive
                             }
-                            className="h-8 w-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30"
+                            className="gap-1.5 disabled:opacity-30"
                           >
-                            <ArrowUp className="h-4 w-4" />
+                            <ArrowUp className="h-3.5 w-3.5" />
+                            Send
                           </Button>
                         </span>
                       </TooltipTrigger>
