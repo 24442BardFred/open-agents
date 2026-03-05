@@ -2,6 +2,8 @@
 
 import {
   Archive,
+  Check,
+  ChevronsUpDown,
   EllipsisVertical,
   GitMerge,
   Pencil,
@@ -58,6 +60,7 @@ type InboxSidebarProps = {
   onSessionPrefetch: (session: SessionWithUnread) => void;
   onRenameSession: (sessionId: string, title: string) => Promise<void>;
   onArchiveSession: (sessionId: string) => Promise<void>;
+  onTeamSwitch?: () => Promise<unknown> | void;
   createSession: (input: CreateSessionInput) => Promise<{
     session: { id: string };
     chat: { id: string };
@@ -302,12 +305,13 @@ export function InboxSidebar({
   onSessionPrefetch,
   onRenameSession,
   onArchiveSession,
+  onTeamSwitch,
   createSession,
   lastRepo,
   initialUser,
 }: InboxSidebarProps) {
   const router = useRouter();
-  const { session } = useSession();
+  const { session, teams, activeTeamId, setActiveTeam } = useSession();
   const { isMobile, setOpenMobile } = useSidebar();
   const [showArchived, setShowArchived] = useState(false);
   const [archivedSessions, setArchivedSessions] = useState<SessionWithUnread[]>(
@@ -324,6 +328,8 @@ export function InboxSidebar({
     useState<SessionWithUnread | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [isSwitchingTeam, setIsSwitchingTeam] = useState(false);
+  const [teamSwitchError, setTeamSwitchError] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchArchivedSessionsPage = useCallback(
@@ -411,6 +417,10 @@ export function InboxSidebar({
     (!showArchived && sessionsLoading && sessions.length === 0) ||
     (showArchived && archivedSessionsLoading && archivedSessions.length === 0);
   const sidebarUser = session?.user ?? initialUser;
+  const currentTeam = useMemo(
+    () => teams.find((team) => team.id === activeTeamId) ?? teams[0],
+    [activeTeamId, teams],
+  );
 
   const handleSessionClick = useCallback(
     (session: SessionWithUnread) => {
@@ -458,6 +468,51 @@ export function InboxSidebar({
   const handleRetryArchivedSessions = useCallback(() => {
     void fetchArchivedSessionsPage({ offset: 0, replace: true });
   }, [fetchArchivedSessionsPage]);
+
+  const handleTeamSwitch = useCallback(
+    async (nextTeamId: string) => {
+      if (isSwitchingTeam || nextTeamId === activeTeamId) {
+        return;
+      }
+
+      setTeamSwitchError(null);
+      setIsSwitchingTeam(true);
+
+      try {
+        await setActiveTeam(nextTeamId);
+        setShowArchived(false);
+        setArchivedSessions([]);
+        setHasMoreArchivedSessions(false);
+        setArchivedSessionsError(null);
+        await onTeamSwitch?.();
+
+        if (activeSessionId) {
+          router.push("/sessions");
+          router.refresh();
+        }
+
+        if (isMobile) {
+          setOpenMobile(false);
+        }
+      } catch (error) {
+        setTeamSwitchError(
+          error instanceof Error ? error.message : "Failed to switch team",
+        );
+      } finally {
+        setIsSwitchingTeam(false);
+      }
+    },
+    [
+      activeSessionId,
+      activeTeamId,
+      isMobile,
+      isSwitchingTeam,
+      onTeamSwitch,
+      router,
+      setActiveTeam,
+      setOpenMobile,
+    ],
+  );
 
   const closeRenameDialog = useCallback(() => {
     setRenameDialogSession(null);
@@ -660,6 +715,65 @@ export function InboxSidebar({
 
       {sidebarUser ? (
         <div className="border-t border-border p-3">
+          {currentTeam ? (
+            <div className="mb-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={isSwitchingTeam}
+                    className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-2.5 py-2 text-left transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Team
+                      </span>
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {currentTeam.name}
+                      </span>
+                    </span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  {teams.map((team) => {
+                    const teamRoleLabel = team.isPersonal
+                      ? "Personal"
+                      : team.role === "owner"
+                        ? "Owner"
+                        : "Member";
+                    const isActive = team.id === activeTeamId;
+
+                    return (
+                      <DropdownMenuItem
+                        key={team.id}
+                        disabled={isSwitchingTeam || isActive}
+                        onClick={() => {
+                          void handleTeamSwitch(team.id);
+                        }}
+                        className="flex items-start justify-between gap-2"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm text-foreground">
+                            {team.name}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {teamRoleLabel}
+                          </span>
+                        </span>
+                        {isActive ? (
+                          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {teamSwitchError ? (
+                <p className="mt-1.5 text-xs text-red-500">{teamSwitchError}</p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 rounded-lg p-2">
             <Avatar className="h-9 w-9 shrink-0">
               {sidebarUser.avatar ? (

@@ -119,6 +119,7 @@ export function SessionsIndexShell({
             onSessionPrefetch={handleSessionPrefetch}
             onRenameSession={handleRenameSession}
             onArchiveSession={handleArchiveSession}
+            onTeamSwitch={refreshSessions}
             createSession={createSession}
             lastRepo={lastRepo}
             initialUser={currentUser}
