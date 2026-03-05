@@ -1,5 +1,5 @@
 import { connectSandbox } from "@open-harness/sandbox";
-import { getSessionById, updateSession } from "@/lib/db/sessions";
+import { getSessionByIdForUser, updateSession } from "@/lib/db/sessions";
 import {
   DEFAULT_SANDBOX_PORTS,
   DEFAULT_SANDBOX_TIMEOUT_MS,
@@ -49,11 +49,8 @@ export async function POST(req: Request) {
   }
 
   // Verify session ownership
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!canOperateOnSandbox(sessionRecord.sandboxState)) {
@@ -121,11 +118,8 @@ export async function PUT(req: Request) {
   }
 
   // Verify session ownership and get snapshot URL
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   // TODO: If the background after() callback in the archive flow crashes before

@@ -2,7 +2,7 @@ import { getServerSession } from "@/lib/session/get-server-session";
 import {
   deleteChatMessageAndFollowing,
   getChatById,
-  getSessionById,
+  getSessionByIdForUser,
 } from "@/lib/db/sessions";
 
 type RouteContext = {
@@ -17,11 +17,8 @@ export async function DELETE(_req: Request, context: RouteContext) {
 
   const { sessionId, chatId, messageId } = await context.params;
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

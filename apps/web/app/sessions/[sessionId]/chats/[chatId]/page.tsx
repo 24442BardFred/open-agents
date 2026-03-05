@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { WebAgentUIMessage } from "@/app/types";
 import { DiffsProvider } from "@/components/diffs-provider";
-import { getChatById, getChatMessages } from "@/lib/db/sessions";
+import {
+  getChatById,
+  getChatMessages,
+  getSessionByIdForUser,
+} from "@/lib/db/sessions";
 import { getSessionByIdCached } from "@/lib/db/sessions-cache";
 import { getUserPreferences } from "@/lib/db/user-preferences";
 import {
@@ -75,25 +79,14 @@ export default async function SessionChatPage({
 }: SessionChatPageProps) {
   const { sessionId, chatId } = await params;
 
-  // Start independent fetches in parallel
-  const sessionPromise = getServerSession();
-  const sessionRecordPromise = getSessionByIdCached(sessionId);
-
-  // Server-side auth check
-  const session = await sessionPromise;
+  const session = await getServerSession();
   if (!session?.user) {
     redirect("/");
   }
 
-  // Fetch session record
-  const sessionRecord = await sessionRecordPromise;
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
     notFound();
-  }
-
-  // Check ownership
-  if (sessionRecord.userId !== session.user.id) {
-    redirect("/");
   }
 
   // Fetch chat, messages, models, and preferences in parallel

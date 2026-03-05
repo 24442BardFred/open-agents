@@ -1,5 +1,5 @@
 import { connectSandbox, type SandboxState } from "@open-harness/sandbox";
-import { getSessionById, updateSession } from "@/lib/db/sessions";
+import { getSessionByIdForUser, updateSession } from "@/lib/db/sessions";
 import {
   buildHibernatedLifecycleUpdate,
   getSandboxExpiresAtDate,
@@ -32,7 +32,7 @@ export type ReconnectResponse = {
 };
 
 function buildLifecyclePayload(
-  sessionRecord: Awaited<ReturnType<typeof getSessionById>>,
+  sessionRecord: Awaited<ReturnType<typeof getSessionByIdForUser>>,
 ) {
   return {
     serverTime: Date.now(),
@@ -62,11 +62,8 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({ error: "Missing sessionId" }, { status: 400 });
   }
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

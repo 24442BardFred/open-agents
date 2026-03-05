@@ -2,7 +2,7 @@ import { connectSandbox } from "@open-harness/sandbox";
 import { gateway, generateText } from "ai";
 import { getGitHubAccount } from "@/lib/db/accounts";
 import { getInstallationByAccountLogin } from "@/lib/db/installations";
-import { getSessionById, updateSession } from "@/lib/db/sessions";
+import { getSessionByIdForUser, updateSession } from "@/lib/db/sessions";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { createRepository } from "@/lib/github/client";
 import { getUserGitHubToken } from "@/lib/github/user-token";
@@ -54,11 +54,8 @@ export async function POST(req: Request) {
   }
 
   // 3. Verify session ownership
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

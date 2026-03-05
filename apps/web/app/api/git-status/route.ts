@@ -1,5 +1,5 @@
 import { connectSandbox } from "@open-harness/sandbox";
-import { getSessionById } from "@/lib/db/sessions";
+import { getSessionByIdForUser } from "@/lib/db/sessions";
 import { isSandboxActive } from "@/lib/sandbox/utils";
 import { getServerSession } from "@/lib/session/get-server-session";
 
@@ -82,11 +82,8 @@ export async function POST(req: Request) {
   }
 
   // Verify session ownership
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!isSandboxActive(sessionRecord.sandboxState)) {

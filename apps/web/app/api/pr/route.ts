@@ -1,4 +1,4 @@
-import { getSessionById, updateSession } from "@/lib/db/sessions";
+import { getSessionByIdForUser, updateSession } from "@/lib/db/sessions";
 import { createPullRequest, parseGitHubUrl } from "@/lib/github/client";
 import { getRepoToken } from "@/lib/github/get-repo-token";
 import { getUserGitHubToken } from "@/lib/github/user-token";
@@ -91,11 +91,8 @@ export async function POST(req: Request) {
   }
 
   // 3. Verify session ownership
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

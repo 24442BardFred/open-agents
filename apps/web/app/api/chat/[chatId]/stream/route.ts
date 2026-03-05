@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import {
   getChatById,
-  getSessionById,
+  getSessionByIdForUser,
   updateChatActiveStreamId,
 } from "@/lib/db/sessions";
 import { resumableStreamContext } from "@/lib/resumable-stream-context";
@@ -26,8 +26,11 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 
   // Verify ownership through the session chain
-  const sessionRecord = await getSessionById(chat.sessionId);
-  if (!sessionRecord || sessionRecord.userId !== session.user.id) {
+  const sessionRecord = await getSessionByIdForUser(
+    chat.sessionId,
+    session.user.id,
+  );
+  if (!sessionRecord) {
     return new Response("Forbidden", { status: 403 });
   }
 

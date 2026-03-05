@@ -3,7 +3,7 @@ import {
   createChat,
   getChatById,
   getChatSummariesBySessionId,
-  getSessionById,
+  getSessionByIdForUser,
 } from "@/lib/db/sessions";
 import { getUserPreferences } from "@/lib/db/user-preferences";
 import { getServerSession } from "@/lib/session/get-server-session";
@@ -19,11 +19,8 @@ export async function GET(_req: Request, context: RouteContext) {
   }
 
   const { sessionId } = await context.params;
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -41,11 +38,8 @@ export async function POST(req: Request, context: RouteContext) {
   }
 
   const { sessionId } = await context.params;
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

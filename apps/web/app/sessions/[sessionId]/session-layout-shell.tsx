@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { InboxSidebar } from "@/components/inbox-sidebar";
 import { useBackgroundChatNotifications } from "@/hooks/use-background-chat-notifications";
 import {
@@ -15,6 +15,7 @@ import {
   useSessionChats,
 } from "@/hooks/use-session-chats";
 import { useSessions, type SessionWithUnread } from "@/hooks/use-sessions";
+import type { SessionScope } from "@/lib/db/sessions";
 import type { Session } from "@/lib/db/schema";
 import type { Session as AuthSession } from "@/lib/session/types";
 import { SessionLayoutContext } from "./session-layout-context";
@@ -43,6 +44,7 @@ export function SessionLayoutShell({
   const router = useRouter();
 
   const sessionId = initialSession.id;
+  const [sessionScope, setSessionScope] = useState<SessionScope>("mine");
 
   const {
     chats,
@@ -60,6 +62,7 @@ export function SessionLayoutShell({
   } = useSessions({
     enabled: true,
     includeArchived: false,
+    scope: sessionScope,
     initialData: initialSessionsData,
   });
 
@@ -145,6 +148,8 @@ export function SessionLayoutShell({
       sessions={sessionsWithStreaming}
       archivedCount={archivedCount}
       sessionsLoading={sessionsLoading}
+      sessionScope={sessionScope}
+      onSessionScopeChange={setSessionScope}
       activeSessionId={sessionId}
       onSessionClick={handleSessionClick}
       onSessionPrefetch={handleSessionPrefetch}

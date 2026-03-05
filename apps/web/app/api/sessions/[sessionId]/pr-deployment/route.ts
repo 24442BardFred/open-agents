@@ -1,4 +1,4 @@
-import { getSessionById } from "@/lib/db/sessions";
+import { getSessionByIdForUser } from "@/lib/db/sessions";
 import { findLatestVercelDeploymentUrlForPullRequest } from "@/lib/github/client";
 import { getRepoToken } from "@/lib/github/get-repo-token";
 import { getServerSession } from "@/lib/session/get-server-session";
@@ -18,13 +18,9 @@ export async function GET(req: Request, context: RouteContext) {
   }
 
   const { sessionId } = await context.params;
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
 
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

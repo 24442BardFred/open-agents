@@ -5,7 +5,11 @@ import {
 } from "@open-harness/sandbox";
 import { after } from "next/server";
 import { getGitHubAccount } from "@/lib/db/accounts";
-import { getSessionById, updateSession } from "@/lib/db/sessions";
+import {
+  getSessionById,
+  getSessionByIdForUser,
+  updateSession,
+} from "@/lib/db/sessions";
 import { parseGitHubUrl } from "@/lib/github/client";
 import { getRepoToken } from "@/lib/github/get-repo-token";
 import { downloadAndExtractTarball } from "@/lib/github/tarball";
@@ -97,11 +101,8 @@ export async function POST(req: Request) {
   // Validate session ownership
   let sessionRecord;
   if (sessionId) {
-    sessionRecord = await getSessionById(sessionId);
+    sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
     if (!sessionRecord) {
-      return Response.json({ error: "Session not found" }, { status: 404 });
-    }
-    if (sessionRecord.userId !== session.user.id) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
   }
@@ -329,11 +330,8 @@ export async function DELETE(req: Request) {
 
   const { sessionId } = body as { sessionId: string };
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   // If there's no sandbox to stop, return success (idempotent)

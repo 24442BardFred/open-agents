@@ -3,7 +3,7 @@ import {
   createShareIfNotExists,
   deleteShareByChatId,
   getChatById,
-  getSessionById,
+  getSessionByIdForUser,
   getShareByChatId,
 } from "@/lib/db/sessions";
 import { getServerSession } from "@/lib/session/get-server-session";
@@ -23,15 +23,8 @@ async function validateOwnedChat(
       response: Response;
     }
 > {
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, userId);
   if (!sessionRecord) {
-    return {
-      ok: false,
-      response: Response.json({ error: "Session not found" }, { status: 404 }),
-    };
-  }
-
-  if (sessionRecord.userId !== userId) {
     return {
       ok: false,
       response: Response.json({ error: "Forbidden" }, { status: 403 }),

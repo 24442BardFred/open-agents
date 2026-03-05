@@ -21,6 +21,7 @@ import {
   createChatMessageIfNotExists,
   getChatById,
   getSessionById,
+  getSessionByIdForUser,
   isFirstChatMessage,
   touchChat,
   updateChat,
@@ -214,14 +215,11 @@ export async function POST(req: Request) {
 
   // 3. Verify session + chat ownership
   const [sessionRecord, chat] = await Promise.all([
-    getSessionById(sessionId),
+    getSessionByIdForUser(sessionId, session.user.id),
     getChatById(chatId),
   ]);
 
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Unauthorized" }, { status: 403 });
   }
   if (!chat || chat.sessionId !== sessionId) {

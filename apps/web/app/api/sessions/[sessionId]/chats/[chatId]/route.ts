@@ -3,7 +3,7 @@ import {
   deleteChat,
   getChatById,
   getChatsBySessionId,
-  getSessionById,
+  getSessionByIdForUser,
   updateChat,
 } from "@/lib/db/sessions";
 
@@ -24,11 +24,8 @@ export async function PATCH(req: Request, context: RouteContext) {
 
   const { sessionId, chatId } = await context.params;
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -78,11 +75,8 @@ export async function DELETE(_req: Request, context: RouteContext) {
 
   const { sessionId, chatId } = await context.params;
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

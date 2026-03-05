@@ -40,6 +40,48 @@ export const users = pgTable(
   ],
 );
 
+export const teams = pgTable(
+  "teams",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    personalOwnerUserId: text("personal_owner_user_id").references(
+      () => users.id,
+      { onDelete: "cascade" },
+    ),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("teams_personal_owner_user_id_idx").on(
+      table.personalOwnerUserId,
+    ),
+  ],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role", {
+      enum: ["owner", "member"],
+    })
+      .notNull()
+      .default("member"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.userId] }),
+    index("team_members_user_id_idx").on(table.userId),
+  ],
+);
+
 export const accounts = pgTable(
   "accounts",
   {
@@ -107,6 +149,9 @@ export const sessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     status: text("status", {
       enum: ["running", "completed", "failed", "archived"],
@@ -159,7 +204,10 @@ export const sessions = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [index("sessions_user_id_idx").on(table.userId)],
+  (table) => [
+    index("sessions_user_id_idx").on(table.userId),
+    index("sessions_team_id_idx").on(table.teamId),
+  ],
 );
 
 export const chats = pgTable(
@@ -224,6 +272,10 @@ export const chatReads = pgTable(
   ],
 );
 
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type NewTeamMember = typeof teamMembers.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type Chat = typeof chats.$inferSelect;

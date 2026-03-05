@@ -79,6 +79,7 @@ mock.module("@/lib/github/tarball", () => ({
 
 mock.module("@/lib/db/sessions", () => ({
   getSessionById: async () => sessionRecord,
+  getSessionByIdForUser: async () => sessionRecord,
   updateSession: async (sessionId: string, patch: Record<string, unknown>) => {
     updateCalls.push({ sessionId, patch });
     return {

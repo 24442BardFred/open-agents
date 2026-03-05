@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { getGitHubAccount } from "@/lib/db/accounts";
 import { getInstallationsByUserId } from "@/lib/db/installations";
+import { listTeamsForUser, resolveActiveTeamIdForUser } from "@/lib/db/teams";
 import { userExists } from "@/lib/db/users";
 import { SESSION_COOKIE_NAME } from "@/lib/session/constants";
 import { getSessionFromReq } from "@/lib/session/server";
@@ -32,6 +33,15 @@ export async function GET(req: NextRequest) {
     return Response.json(UNAUTHENTICATED);
   }
 
+  const [activeTeamId, teams] = await Promise.all([
+    resolveActiveTeamIdForUser({
+      userId: session.user.id,
+      username: session.user.username,
+      preferredTeamId: session.activeTeamId,
+    }),
+    listTeamsForUser(session.user.id),
+  ]);
+
   const hasGitHubAccount = ghAccount !== null;
   const hasGitHubInstallations = installations.length > 0;
   const hasGitHub = hasGitHubAccount || hasGitHubInstallations;
@@ -39,6 +49,8 @@ export async function GET(req: NextRequest) {
   const data: SessionUserInfo = {
     user: session.user,
     authProvider: session.authProvider,
+    activeTeamId,
+    teams,
     hasGitHub,
     hasGitHubAccount,
     hasGitHubInstallations,

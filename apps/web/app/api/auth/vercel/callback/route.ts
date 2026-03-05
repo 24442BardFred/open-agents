@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { encrypt } from "@/lib/crypto";
 import { encryptJWE } from "@/lib/jwe/encrypt";
+import { ensurePersonalTeamForUser } from "@/lib/db/teams";
 import { upsertUser } from "@/lib/db/users";
 import { SESSION_COOKIE_NAME } from "@/lib/session/constants";
 import { exchangeVercelCode, getVercelUserInfo } from "@/lib/vercel/oauth";
@@ -65,9 +66,15 @@ export async function GET(req: NextRequest): Promise<Response> {
       tokenExpiresAt,
     });
 
+    const personalTeam = await ensurePersonalTeamForUser({
+      userId,
+      username,
+    });
+
     const session = {
       created: Date.now(),
       authProvider: "vercel" as const,
+      activeTeamId: personalTeam.id,
       user: {
         id: userId,
         username,

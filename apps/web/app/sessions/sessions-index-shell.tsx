@@ -4,6 +4,7 @@ import { MessageSquare, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { InboxSidebar } from "@/components/inbox-sidebar";
+import type { SessionScope } from "@/lib/db/sessions";
 import { NewSessionDialog } from "@/components/new-session-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,7 @@ export function SessionsIndexShell({
 }: SessionsIndexShellProps) {
   const router = useRouter();
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [sessionScope, setSessionScope] = useState<SessionScope>("mine");
 
   const {
     sessions,
@@ -51,6 +53,7 @@ export function SessionsIndexShell({
   } = useSessions({
     enabled: true,
     includeArchived: false,
+    scope: sessionScope,
     initialData: initialSessionsData,
   });
 
@@ -109,6 +112,8 @@ export function SessionsIndexShell({
             sessions={sessions}
             archivedCount={archivedCount}
             sessionsLoading={sessionsLoading}
+            sessionScope={sessionScope}
+            onSessionScopeChange={setSessionScope}
             activeSessionId=""
             onSessionClick={handleSessionClick}
             onSessionPrefetch={handleSessionPrefetch}

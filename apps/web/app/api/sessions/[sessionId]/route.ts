@@ -3,6 +3,8 @@ import { after } from "next/server";
 import {
   deleteSession,
   getSessionById,
+  getSessionByIdForUser,
+  isSessionOwner,
   updateSession,
 } from "@/lib/db/sessions";
 import {
@@ -31,14 +33,13 @@ export async function GET(
   }
 
   const { sessionId } = await params;
-  const existingSession = await getSessionById(sessionId);
+  const existingSession = await getSessionByIdForUser(
+    sessionId,
+    session.user.id,
+  );
 
   if (!existingSession) {
     return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  if (existingSession.userId !== session.user.id) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   return Response.json({ session: existingSession });
@@ -54,14 +55,20 @@ export async function PATCH(
   }
 
   const { sessionId } = await params;
-  const existingSession = await getSessionById(sessionId);
+  const existingSession = await getSessionByIdForUser(
+    sessionId,
+    session.user.id,
+  );
 
   if (!existingSession) {
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  if (existingSession.userId !== session.user.id) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  if (!isSessionOwner(session.user.id, existingSession)) {
+    return Response.json(
+      { error: "Only the session owner can update this session" },
+      { status: 403 },
+    );
   }
 
   let body: UpdateSessionRequest;
@@ -182,14 +189,20 @@ export async function DELETE(
   }
 
   const { sessionId } = await params;
-  const existingSession = await getSessionById(sessionId);
+  const existingSession = await getSessionByIdForUser(
+    sessionId,
+    session.user.id,
+  );
 
   if (!existingSession) {
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  if (existingSession.userId !== session.user.id) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  if (!isSessionOwner(session.user.id, existingSession)) {
+    return Response.json(
+      { error: "Only the session owner can delete this session" },
+      { status: 403 },
+    );
   }
 
   await deleteSession(sessionId);

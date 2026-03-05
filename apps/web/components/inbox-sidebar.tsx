@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useSession } from "@/hooks/use-session";
 import type { SessionWithUnread } from "@/hooks/use-sessions";
+import type { SessionScope } from "@/lib/db/sessions";
 import type { Session as AuthSession } from "@/lib/session/types";
 
 type CreateSessionInput = {
@@ -50,6 +51,8 @@ type InboxSidebarProps = {
   sessions: SessionWithUnread[];
   archivedCount: number;
   sessionsLoading: boolean;
+  sessionScope: SessionScope;
+  onSessionScopeChange: (scope: SessionScope) => void;
   activeSessionId: string;
   onSessionClick: (session: SessionWithUnread) => void;
   onSessionPrefetch: (session: SessionWithUnread) => void;
@@ -228,36 +231,38 @@ const SessionRow = memo(function SessionRow({
         </button>
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            onClick={(e) => e.stopPropagation()}
-            className="absolute right-2 top-2.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-background/60 hover:text-foreground group-hover:opacity-100"
-            aria-label={`Open menu for ${session.title}`}
-          >
-            <EllipsisVertical className="h-3 w-3" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onClick={() => onOpenRenameDialog(session)}
-            className="gap-2"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            <span>Rename session</span>
-          </DropdownMenuItem>
-          {session.status !== "archived" ? (
+      {session.isOwnedByCurrentUser ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-2 top-2.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-background/60 hover:text-foreground group-hover:opacity-100"
+              aria-label={`Open menu for ${session.title}`}
+            >
+              <EllipsisVertical className="h-3 w-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
             <DropdownMenuItem
-              onClick={() => onArchiveSession(session)}
+              onClick={() => onOpenRenameDialog(session)}
               className="gap-2"
             >
-              <Archive className="h-3.5 w-3.5" />
-              <span>Archive session</span>
+              <Pencil className="h-3.5 w-3.5" />
+              <span>Rename session</span>
             </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            {session.status !== "archived" ? (
+              <DropdownMenuItem
+                onClick={() => onArchiveSession(session)}
+                className="gap-2"
+              >
+                <Archive className="h-3.5 w-3.5" />
+                <span>Archive session</span>
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </div>
   );
 }, areSessionRowsEqual);
@@ -275,6 +280,7 @@ function areSessionRowsEqual(
     prev.session.title === next.session.title &&
     prev.session.hasStreaming === next.session.hasStreaming &&
     prev.session.hasUnread === next.session.hasUnread &&
+    prev.session.isOwnedByCurrentUser === next.session.isOwnedByCurrentUser &&
     prev.session.repoName === next.session.repoName &&
     prev.session.branch === next.session.branch &&
     prev.session.prNumber === next.session.prNumber &&
@@ -289,6 +295,8 @@ export function InboxSidebar({
   sessions,
   archivedCount,
   sessionsLoading,
+  sessionScope,
+  onSessionScopeChange,
   activeSessionId,
   onSessionClick,
   onSessionPrefetch,
@@ -331,6 +339,7 @@ export function InboxSidebar({
       try {
         const query = new URLSearchParams({
           status: "archived",
+          scope: sessionScope,
           limit: String(ARCHIVED_SESSIONS_PAGE_SIZE),
           offset: String(offset),
         });
@@ -365,7 +374,7 @@ export function InboxSidebar({
         setArchivedSessionsLoading(false);
       }
     },
-    [],
+    [sessionScope],
   );
 
   useEffect(() => {
@@ -374,6 +383,12 @@ export function InboxSidebar({
       renameInputRef.current.select();
     }
   }, [renameDialogSession]);
+
+  useEffect(() => {
+    setArchivedSessions([]);
+    setHasMoreArchivedSessions(false);
+    setArchivedSessionsError(null);
+  }, [sessionScope]);
 
   useEffect(() => {
     if (!showArchived) {
@@ -509,6 +524,31 @@ export function InboxSidebar({
           >
             <Plus className="h-4 w-4" />
           </Button>
+        </div>
+
+        <div className="mb-2 flex gap-1">
+          <button
+            type="button"
+            onClick={() => onSessionScopeChange("mine")}
+            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              sessionScope === "mine"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Mine
+          </button>
+          <button
+            type="button"
+            onClick={() => onSessionScopeChange("team")}
+            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              sessionScope === "team"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Team
+          </button>
         </div>
 
         <div className="flex gap-1">

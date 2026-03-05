@@ -2,11 +2,12 @@ import { nanoid } from "nanoid";
 import { notFound, redirect } from "next/navigation";
 import {
   createSessionWithInitialChat,
-  getUsedSessionTitles,
+  getUsedSessionTitlesByTeamScope,
 } from "@/lib/db/sessions";
 import { getUserPreferences } from "@/lib/db/user-preferences";
 import { getRepoToken } from "@/lib/github/get-repo-token";
 import { getRandomCityName } from "@/lib/random-city";
+import { resolveActiveTeamIdForSession } from "@/lib/session/active-team";
 import { getServerSession } from "@/lib/session/get-server-session";
 
 interface RepoPageProps {
@@ -83,13 +84,19 @@ export default async function RepoPage({ params }: RepoPageProps) {
 
   const cloneUrl = `https://github.com/${username}/${repo}.git`;
 
-  const usedNames = await getUsedSessionTitles(session.user.id);
+  const activeTeamId = await resolveActiveTeamIdForSession(session);
+  const usedNames = await getUsedSessionTitlesByTeamScope({
+    userId: session.user.id,
+    teamId: activeTeamId,
+    scope: "mine",
+  });
   const title = getRandomCityName(usedNames);
 
   const result = await createSessionWithInitialChat({
     session: {
       id: nanoid(),
       userId: session.user.id,
+      teamId: activeTeamId,
       title,
       status: "running",
       repoOwner: username,

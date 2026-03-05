@@ -1,12 +1,14 @@
 import { nanoid } from "nanoid";
 import {
   createSessionWithInitialChat,
-  getArchivedSessionCountByUserId,
-  getSessionsWithUnreadByUserId,
-  getUsedSessionTitles,
+  getArchivedSessionCountByTeamScope,
+  getSessionsWithUnreadByTeamScope,
+  getUsedSessionTitlesByTeamScope,
+  type SessionScope,
 } from "@/lib/db/sessions";
 import { getUserPreferences } from "@/lib/db/user-preferences";
 import { getRandomCityName } from "@/lib/random-city";
+import { resolveActiveTeamIdForSession } from "@/lib/session/active-team";
 import { getServerSession } from "@/lib/session/get-server-session";
 
 interface CreateSessionRequest {
@@ -38,11 +40,16 @@ function generateBranchName(username: string, name?: string | null): string {
 async function resolveSessionTitle(
   input: CreateSessionRequest,
   userId: string,
+  teamId: string,
 ): Promise<string> {
   if (input.title && input.title.trim()) {
     return input.title.trim();
   }
-  const usedNames = await getUsedSessionTitles(userId);
+  const usedNames = await getUsedSessionTitlesByTeamScope({
+    userId,
+    teamId,
+    scope: "mine",
+  });
   return getRandomCityName(usedNames);
 }
 
@@ -50,6 +57,7 @@ const DEFAULT_ARCHIVED_SESSIONS_LIMIT = 50;
 const MAX_ARCHIVED_SESSIONS_LIMIT = 100;
 
 type SessionsStatusFilter = "all" | "active" | "archived";
+type SessionsScopeFilter = SessionScope;
 
 function parseNonNegativeInteger(value: string | null): number | null {
   if (value === null) {
@@ -80,7 +88,14 @@ export async function GET(req: Request) {
     return Response.json({ error: "Invalid status filter" }, { status: 400 });
   }
 
+  const rawScope = searchParams.get("scope");
+  if (rawScope !== null && rawScope !== "mine" && rawScope !== "team") {
+    return Response.json({ error: "Invalid scope filter" }, { status: 400 });
+  }
+
   const statusParam: SessionsStatusFilter = rawStatus ?? "all";
+  const scopeParam: SessionsScopeFilter = rawScope ?? "mine";
+  const teamId = await resolveActiveTeamIdForSession(session);
 
   if (statusParam === "archived") {
     const rawLimit = parseNonNegativeInteger(searchParams.get("limit"));
@@ -107,12 +122,17 @@ export async function GET(req: Request) {
     const offset = rawOffset ?? 0;
 
     const [sessions, archivedCount] = await Promise.all([
-      getSessionsWithUnreadByUserId(session.user.id, {
+      getSessionsWithUnreadByTeamScope(session.user.id, teamId, {
         status: "archived",
+        scope: scopeParam,
         limit,
         offset,
       }),
-      getArchivedSessionCountByUserId(session.user.id),
+      getArchivedSessionCountByTeamScope({
+        userId: session.user.id,
+        teamId,
+        scope: scopeParam,
+      }),
     ]);
 
     return Response.json({
@@ -129,16 +149,27 @@ export async function GET(req: Request) {
 
   if (statusParam === "active") {
     const [sessions, archivedCount] = await Promise.all([
-      getSessionsWithUnreadByUserId(session.user.id, {
+      getSessionsWithUnreadByTeamScope(session.user.id, teamId, {
         status: "active",
+        scope: scopeParam,
       }),
-      getArchivedSessionCountByUserId(session.user.id),
+      getArchivedSessionCountByTeamScope({
+        userId: session.user.id,
+        teamId,
+        scope: scopeParam,
+      }),
     ]);
 
     return Response.json({ sessions, archivedCount });
   }
 
-  const sessions = await getSessionsWithUnreadByUserId(session.user.id);
+  const sessions = await getSessionsWithUnreadByTeamScope(
+    session.user.id,
+    teamId,
+    {
+      scope: scopeParam,
+    },
+  );
   return Response.json({ sessions });
 }
 
@@ -170,12 +201,14 @@ export async function POST(req: Request) {
   }
 
   try {
-    const title = await resolveSessionTitle(body, session.user.id);
+    const teamId = await resolveActiveTeamIdForSession(session);
+    const title = await resolveSessionTitle(body, session.user.id, teamId);
     const preferences = await getUserPreferences(session.user.id);
     const result = await createSessionWithInitialChat({
       session: {
         id: nanoid(),
         userId: session.user.id,
+        teamId,
         title,
         status: "running",
         repoOwner,

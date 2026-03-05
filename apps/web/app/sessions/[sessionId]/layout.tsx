@@ -1,12 +1,13 @@
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import {
-  getArchivedSessionCountByUserId,
+  getArchivedSessionCountByTeamScope,
   getChatSummariesBySessionId,
-  getSessionsWithUnreadByUserId,
+  getSessionByIdForUser,
+  getSessionsWithUnreadByTeamScope,
 } from "@/lib/db/sessions";
-import { getSessionByIdCached } from "@/lib/db/sessions-cache";
 import { getUserPreferences } from "@/lib/db/user-preferences";
+import { resolveActiveTeamIdForSession } from "@/lib/session/active-team";
 import { getServerSession } from "@/lib/session/get-server-session";
 import { SessionLayoutShell } from "./session-layout-shell";
 
@@ -21,22 +22,17 @@ export default async function SessionLayout({
 }: SessionLayoutProps) {
   const { sessionId } = await params;
 
-  const sessionPromise = getServerSession();
-  const sessionRecordPromise = getSessionByIdCached(sessionId);
-
-  const session = await sessionPromise;
+  const session = await getServerSession();
   if (!session?.user) {
     redirect("/");
   }
 
-  const sessionRecord = await sessionRecordPromise;
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
     notFound();
   }
 
-  if (sessionRecord.userId !== session.user.id) {
-    redirect("/");
-  }
+  const activeTeamId = await resolveActiveTeamIdForSession(session);
 
   let initialChatsData:
     | {
@@ -46,7 +42,7 @@ export default async function SessionLayout({
     | undefined;
   let initialSessionsData:
     | {
-        sessions: Awaited<ReturnType<typeof getSessionsWithUnreadByUserId>>;
+        sessions: Awaited<ReturnType<typeof getSessionsWithUnreadByTeamScope>>;
         archivedCount: number;
       }
     | undefined;
@@ -55,8 +51,15 @@ export default async function SessionLayout({
     const [chats, preferences, sessions, archivedCount] = await Promise.all([
       getChatSummariesBySessionId(sessionId, session.user.id),
       getUserPreferences(session.user.id),
-      getSessionsWithUnreadByUserId(session.user.id, { status: "active" }),
-      getArchivedSessionCountByUserId(session.user.id),
+      getSessionsWithUnreadByTeamScope(session.user.id, activeTeamId, {
+        status: "active",
+        scope: "mine",
+      }),
+      getArchivedSessionCountByTeamScope({
+        userId: session.user.id,
+        teamId: activeTeamId,
+        scope: "mine",
+      }),
     ]);
     initialChatsData = {
       chats,

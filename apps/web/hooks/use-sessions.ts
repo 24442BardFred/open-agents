@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import useSWR, { useSWRConfig } from "swr";
+import type { SessionScope } from "@/lib/db/sessions";
 import type { Chat, Session } from "@/lib/db/schema";
 import { fetcher } from "@/lib/swr";
 
@@ -20,6 +22,7 @@ export type SessionWithUnread = Pick<
   hasUnread: boolean;
   hasStreaming: boolean;
   latestChatId: string | null;
+  isOwnedByCurrentUser: boolean;
 };
 
 interface CreateSessionInput {
@@ -45,13 +48,15 @@ interface CreateSessionResponse {
 export function useSessions(options?: {
   enabled?: boolean;
   includeArchived?: boolean;
+  scope?: SessionScope;
   initialData?: SessionsResponse;
 }) {
   const enabled = options?.enabled ?? true;
   const includeArchived = options?.includeArchived ?? true;
+  const scope = options?.scope ?? "mine";
   const sessionsEndpoint = includeArchived
-    ? "/api/sessions"
-    : "/api/sessions?status=active";
+    ? `/api/sessions?scope=${scope}`
+    : `/api/sessions?status=active&scope=${scope}`;
 
   const { data, error, isLoading, mutate } = useSWR<SessionsResponse>(
     enabled ? "/api/sessions" : null,
@@ -69,6 +74,15 @@ export function useSessions(options?: {
       },
     },
   );
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    void mutate();
+  }, [enabled, mutate, sessionsEndpoint]);
+
   const { mutate: globalMutate } = useSWRConfig();
 
   const sessions = data?.sessions ?? [];
@@ -117,6 +131,7 @@ export function useSessions(options?: {
             hasUnread: false,
             hasStreaming: false,
             latestChatId: createdChat.id,
+            isOwnedByCurrentUser: true,
           },
           ...(current?.sessions ?? []),
         ],
@@ -175,6 +190,7 @@ export function useSessions(options?: {
                     hasUnread: session.hasUnread,
                     hasStreaming: session.hasStreaming,
                     latestChatId: session.latestChatId,
+                    isOwnedByCurrentUser: session.isOwnedByCurrentUser,
                   }
                 : session,
             ),

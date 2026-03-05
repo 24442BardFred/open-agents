@@ -12,6 +12,7 @@ import {
   sessions,
   shares,
 } from "./schema";
+import { isUserMemberOfTeam } from "./teams";
 
 export async function createSession(data: NewSession) {
   const [session] = await db.insert(sessions).values(data).returning();
@@ -59,6 +60,38 @@ export async function getSessionById(sessionId: string) {
   return db.query.sessions.findFirst({
     where: eq(sessions.id, sessionId),
   });
+}
+
+export async function canUserAccessSession(
+  userId: string,
+  sessionRecord: Pick<typeof sessions.$inferSelect, "userId" | "teamId">,
+): Promise<boolean> {
+  if (sessionRecord.userId === userId) {
+    return true;
+  }
+
+  return isUserMemberOfTeam(userId, sessionRecord.teamId);
+}
+
+export function isSessionOwner(
+  userId: string,
+  sessionRecord: Pick<typeof sessions.$inferSelect, "userId">,
+): boolean {
+  return sessionRecord.userId === userId;
+}
+
+export async function getSessionByIdForUser(sessionId: string, userId: string) {
+  const sessionRecord = await getSessionById(sessionId);
+  if (!sessionRecord) {
+    return null;
+  }
+
+  const canAccess = await canUserAccessSession(userId, sessionRecord);
+  if (!canAccess) {
+    return null;
+  }
+
+  return sessionRecord;
 }
 
 export async function getShareById(shareId: string) {
@@ -116,7 +149,10 @@ export type SessionWithUnread = SessionSidebarFields & {
   hasUnread: boolean;
   hasStreaming: boolean;
   latestChatId: string | null;
+  isOwnedByCurrentUser: boolean;
 };
+
+export type SessionScope = "mine" | "team";
 
 type GetSessionsWithUnreadByUserIdOptions = {
   status?: "all" | "active" | "archived";
@@ -124,24 +160,57 @@ type GetSessionsWithUnreadByUserIdOptions = {
   offset?: number;
 };
 
+type GetSessionsWithUnreadByTeamScopeOptions =
+  GetSessionsWithUnreadByUserIdOptions & {
+    scope?: SessionScope;
+  };
+
+function buildSessionScopeFilter(input: {
+  userId: string;
+  teamId?: string;
+  scope: SessionScope;
+}) {
+  if (input.scope === "team") {
+    if (!input.teamId) {
+      throw new Error("teamId is required when scope is 'team'");
+    }
+
+    return eq(sessions.teamId, input.teamId);
+  }
+
+  if (!input.teamId) {
+    return eq(sessions.userId, input.userId);
+  }
+
+  return and(
+    eq(sessions.userId, input.userId),
+    eq(sessions.teamId, input.teamId),
+  );
+}
+
 /**
- * Returns sessions for a user, each annotated with a `hasUnread` flag
- * that is true when any chat in the session has unread assistant messages.
+ * Returns sessions for a user/team scope, each annotated with a `hasUnread`
+ * flag that is true when any chat in the session has unread assistant
+ * messages.
  *
  * The sidebar only needs lightweight fields, so we intentionally avoid
  * selecting heavyweight JSON columns like `sandboxState` and `cachedDiff`.
  */
-export async function getSessionsWithUnreadByUserId(
+export async function getSessionsWithUnreadByTeamScope(
   userId: string,
-  options?: GetSessionsWithUnreadByUserIdOptions,
+  teamId: string | undefined,
+  options?: GetSessionsWithUnreadByTeamScopeOptions,
 ): Promise<SessionWithUnread[]> {
   const status = options?.status ?? "all";
+  const scope = options?.scope ?? "mine";
   const statusFilter =
     status === "active"
       ? ne(sessions.status, "archived")
       : status === "archived"
         ? eq(sessions.status, "archived")
         : undefined;
+
+  const scopeFilter = buildSessionScopeFilter({ userId, teamId, scope });
 
   const baseQuery = db
     .select({
@@ -168,6 +237,7 @@ export async function getSessionsWithUnreadByUserId(
         ARRAY_AGG(${chats.id} ORDER BY ${chats.updatedAt} DESC, ${chats.createdAt} DESC)
         FILTER (WHERE ${chats.id} IS NOT NULL)
       )[1]`,
+      isOwnedByCurrentUser: sql<boolean>`${sessions.userId} = ${userId}`,
     })
     .from(sessions)
     .leftJoin(chats, eq(chats.sessionId, sessions.id))
@@ -175,11 +245,7 @@ export async function getSessionsWithUnreadByUserId(
       chatReads,
       and(eq(chatReads.chatId, chats.id), eq(chatReads.userId, userId)),
     )
-    .where(
-      statusFilter
-        ? and(eq(sessions.userId, userId), statusFilter)
-        : eq(sessions.userId, userId),
-    )
+    .where(statusFilter ? and(scopeFilter, statusFilter) : scopeFilter)
     .groupBy(sessions.id)
     .orderBy(desc(sessions.createdAt));
 
@@ -194,6 +260,36 @@ export async function getSessionsWithUnreadByUserId(
       : await withOffset;
 
   return rows;
+}
+
+export async function getSessionsWithUnreadByUserId(
+  userId: string,
+  options?: GetSessionsWithUnreadByUserIdOptions,
+): Promise<SessionWithUnread[]> {
+  return getSessionsWithUnreadByTeamScope(userId, undefined, {
+    ...options,
+    scope: "mine",
+  });
+}
+
+export async function getArchivedSessionCountByTeamScope(input: {
+  userId: string;
+  teamId: string;
+  scope?: SessionScope;
+}): Promise<number> {
+  const scope = input.scope ?? "mine";
+  const scopeFilter = buildSessionScopeFilter({
+    userId: input.userId,
+    teamId: input.teamId,
+    scope,
+  });
+
+  const [result] = await db
+    .select({ count: sql<number>`COUNT(*)::int` })
+    .from(sessions)
+    .where(and(scopeFilter, eq(sessions.status, "archived")));
+
+  return result?.count ?? 0;
 }
 
 export async function getArchivedSessionCountByUserId(
@@ -221,9 +317,28 @@ export async function getUsedSessionTitles(
   return new Set(rows.map((r) => r.title));
 }
 
+export async function getUsedSessionTitlesByTeamScope(input: {
+  userId: string;
+  teamId: string;
+  scope?: SessionScope;
+}): Promise<Set<string>> {
+  const scopeFilter = buildSessionScopeFilter({
+    userId: input.userId,
+    teamId: input.teamId,
+    scope: input.scope ?? "mine",
+  });
+
+  const rows = await db
+    .select({ title: sessions.title })
+    .from(sessions)
+    .where(scopeFilter);
+
+  return new Set(rows.map((row) => row.title));
+}
+
 export async function updateSession(
   sessionId: string,
-  data: Partial<Omit<NewSession, "id" | "userId" | "createdAt">>,
+  data: Partial<Omit<NewSession, "id" | "userId" | "teamId" | "createdAt">>,
 ) {
   const [session] = await db
     .update(sessions)

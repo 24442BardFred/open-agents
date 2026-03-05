@@ -12,6 +12,7 @@ export async function getSessionFromCookie(
       return {
         created: decrypted.created,
         authProvider: decrypted.authProvider,
+        activeTeamId: decrypted.activeTeamId,
         user: decrypted.user,
       };
     }

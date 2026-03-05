@@ -5,7 +5,7 @@ import { getGitHubAccount } from "@/lib/db/accounts";
 import {
   getChatMessages,
   getChatsBySessionId,
-  getSessionById,
+  getSessionByIdForUser,
   updateSession,
 } from "@/lib/db/sessions";
 import { getRepoToken } from "@/lib/github/get-repo-token";
@@ -309,11 +309,8 @@ export async function POST(req: Request) {
   }
 
   // Verify session ownership
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!isSandboxActive(sessionRecord.sandboxState)) {

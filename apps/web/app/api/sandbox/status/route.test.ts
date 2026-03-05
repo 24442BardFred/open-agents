@@ -29,7 +29,7 @@ mock.module("@/lib/session/get-server-session", () => ({
 }));
 
 mock.module("@/lib/db/sessions", () => ({
-  getSessionById: async () => sessionRecord,
+  getSessionByIdForUser: async () => sessionRecord,
 }));
 
 mock.module("@/lib/sandbox/lifecycle-kick", () => ({

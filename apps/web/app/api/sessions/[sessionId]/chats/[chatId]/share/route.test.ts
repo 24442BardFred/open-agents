@@ -24,7 +24,7 @@ mock.module("nanoid", () => ({
 }));
 
 mock.module("@/lib/db/sessions", () => ({
-  getSessionById: async () => sessionRecord,
+  getSessionByIdForUser: async () => sessionRecord,
   getChatById: async () => chatRecord,
   getShareByChatId: async () => shareRecord,
   createShareIfNotExists: async (input: { id: string; chatId: string }) => {
@@ -162,8 +162,8 @@ describe("/api/sessions/[sessionId]/chats/[chatId]/share", () => {
     expect(deleteResponse.status).toBe(401);
   });
 
-  test("returns 403 when session does not belong to current user", async () => {
-    sessionRecord = { id: "session-1", userId: "different-user" };
+  test("returns 403 when session is not accessible", async () => {
+    sessionRecord = null;
     const { GET } = await routeModulePromise;
 
     const response = await GET(

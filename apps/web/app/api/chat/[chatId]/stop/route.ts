@@ -1,4 +1,4 @@
-import { getChatById, getSessionById } from "@/lib/db/sessions";
+import { getChatById, getSessionByIdForUser } from "@/lib/db/sessions";
 import {
   createRedisClient,
   isRedisConfigured,
@@ -24,8 +24,11 @@ export async function POST(_request: Request, context: RouteContext) {
   }
 
   // Verify ownership through the session chain
-  const sessionRecord = await getSessionById(chat.sessionId);
-  if (!sessionRecord || sessionRecord.userId !== session.user.id) {
+  const sessionRecord = await getSessionByIdForUser(
+    chat.sessionId,
+    session.user.id,
+  );
+  if (!sessionRecord) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

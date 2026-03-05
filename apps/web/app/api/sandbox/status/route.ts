@@ -1,4 +1,4 @@
-import { getSessionById } from "@/lib/db/sessions";
+import { getSessionByIdForUser } from "@/lib/db/sessions";
 import { SANDBOX_EXPIRES_BUFFER_MS } from "@/lib/sandbox/config";
 import { getLifecycleDueAtMs } from "@/lib/sandbox/lifecycle";
 import { kickSandboxLifecycleWorkflow } from "@/lib/sandbox/lifecycle-kick";
@@ -31,11 +31,8 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({ error: "Missing sessionId" }, { status: 400 });
   }
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

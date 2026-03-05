@@ -1,5 +1,9 @@
 import { getServerSession } from "@/lib/session/get-server-session";
-import { getChatById, getSessionById, markChatRead } from "@/lib/db/sessions";
+import {
+  getChatById,
+  getSessionByIdForUser,
+  markChatRead,
+} from "@/lib/db/sessions";
 
 type RouteContext = {
   params: Promise<{ sessionId: string; chatId: string }>;
@@ -13,11 +17,8 @@ export async function POST(_req: Request, context: RouteContext) {
 
   const { sessionId, chatId } = await context.params;
 
-  const sessionRecord = await getSessionById(sessionId);
+  const sessionRecord = await getSessionByIdForUser(sessionId, session.user.id);
   if (!sessionRecord) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (sessionRecord.userId !== session.user.id) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
