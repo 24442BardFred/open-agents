@@ -3,6 +3,7 @@ import {
   mergeProviderOptions,
   type ProviderOptionsByProvider,
   shouldApplyOpenAIReasoningDefaults,
+  withRequiredOpenAIReasoningInclude,
 } from "./models";
 
 describe("shouldApplyOpenAIReasoningDefaults", () => {
@@ -104,6 +105,61 @@ describe("mergeProviderOptions", () => {
     expect(mergeProviderOptions(defaults, overrides)).toEqual({
       openai: {
         include: ["reasoning.summary"],
+      },
+    });
+  });
+});
+
+describe("withRequiredOpenAIReasoningInclude", () => {
+  test("adds encrypted reasoning include when GPT-5 store is false", () => {
+    const providerOptions: ProviderOptionsByProvider = {
+      openai: {
+        store: false,
+        include: ["reasoning.summary"],
+      },
+    };
+
+    expect(
+      withRequiredOpenAIReasoningInclude(
+        "openai/gpt-5.4-codex",
+        providerOptions,
+      ),
+    ).toEqual({
+      openai: {
+        store: false,
+        include: ["reasoning.summary", "reasoning.encrypted_content"],
+      },
+    });
+  });
+
+  test("forces store false when a GPT-5 override sets store to true", () => {
+    const providerOptions: ProviderOptionsByProvider = {
+      openai: {
+        store: true,
+        include: ["reasoning.summary"],
+      },
+    };
+
+    expect(
+      withRequiredOpenAIReasoningInclude(
+        "openai/gpt-5.4-codex",
+        providerOptions,
+      ),
+    ).toEqual({
+      openai: {
+        store: false,
+        include: ["reasoning.summary", "reasoning.encrypted_content"],
+      },
+    });
+  });
+
+  test("adds required OpenAI options when none are provided for GPT-5", () => {
+    expect(
+      withRequiredOpenAIReasoningInclude("openai/gpt-5.4-codex", {}),
+    ).toEqual({
+      openai: {
+        store: false,
+        include: ["reasoning.encrypted_content"],
       },
     });
   });

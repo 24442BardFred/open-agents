@@ -100,6 +100,41 @@ export function shouldApplyOpenAIReasoningDefaults(modelId: string): boolean {
   return modelId.startsWith("openai/gpt-5");
 }
 
+const OPENAI_REASONING_ENCRYPTED_CONTENT_INCLUDE =
+  "reasoning.encrypted_content";
+
+export function withRequiredOpenAIReasoningInclude(
+  modelId: string,
+  providerOptions: ProviderOptionsByProvider,
+): ProviderOptionsByProvider {
+  if (!shouldApplyOpenAIReasoningDefaults(modelId)) {
+    return providerOptions;
+  }
+
+  const openaiOptions = providerOptions.openai ?? {};
+  const include = Array.isArray(openaiOptions.include)
+    ? [...openaiOptions.include]
+    : [];
+  const hasEncryptedReasoningInclude = include.includes(
+    OPENAI_REASONING_ENCRYPTED_CONTENT_INCLUDE,
+  );
+
+  if (openaiOptions.store === false && hasEncryptedReasoningInclude) {
+    return providerOptions;
+  }
+
+  return {
+    ...providerOptions,
+    openai: {
+      ...openaiOptions,
+      store: false,
+      include: hasEncryptedReasoningInclude
+        ? include
+        : [...include, OPENAI_REASONING_ENCRYPTED_CONTENT_INCLUDE],
+    },
+  };
+}
+
 export function gateway(
   modelId: GatewayModelId,
   options: GatewayOptions = {},
@@ -134,9 +169,9 @@ export function gateway(
     } satisfies OpenAIResponsesProviderOptions);
   }
 
-  const providerOptions = mergeProviderOptions(
-    defaultProviderOptions,
-    providerOptionsOverrides,
+  const providerOptions = withRequiredOpenAIReasoningInclude(
+    modelId,
+    mergeProviderOptions(defaultProviderOptions, providerOptionsOverrides),
   );
 
   if (Object.keys(providerOptions).length > 0) {
