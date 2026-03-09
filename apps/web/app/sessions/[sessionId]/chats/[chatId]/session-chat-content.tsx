@@ -3062,7 +3062,14 @@ export function SessionChatContent(_props: unknown) {
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                if (isArchived || !isSandboxActive) return;
+                if (
+                  isArchived ||
+                  !isSandboxActive ||
+                  isChatInFlight ||
+                  hasPendingResponse
+                ) {
+                  return;
+                }
                 const hasContent = input.trim() || images.length > 0;
                 if (!hasContent) return;
 
@@ -3207,7 +3214,13 @@ export function SessionChatContent(_props: unknown) {
                       return;
                     }
                     // On iOS, Return should insert a newline (send via submit button)
-                    if (e.key === "Enter" && !e.shiftKey && !isIosDevice) {
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey &&
+                      !isIosDevice &&
+                      !isChatInFlight &&
+                      !hasPendingResponse
+                    ) {
                       e.preventDefault();
                       if (!isArchived && isSandboxActive) {
                         e.currentTarget.form?.requestSubmit();
@@ -3235,7 +3248,7 @@ export function SessionChatContent(_props: unknown) {
                       }
                     }
                   }}
-                  disabled={isArchived || isChatInFlight}
+                  disabled={isArchived}
                   className="w-full resize-none overflow-y-auto bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none"
                   style={{ minHeight: "24px" }}
                 />
