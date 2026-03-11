@@ -198,6 +198,11 @@ function formatRelativeTime(date: Date): string {
   });
 }
 
+type ReasoningMessagePart = Extract<
+  WebAgentUIMessagePart,
+  { type: "reasoning" }
+>;
+
 type MessageRenderGroup =
   | {
       type: "part";
@@ -208,6 +213,12 @@ type MessageRenderGroup =
   | {
       type: "task-group";
       tasks: TaskToolUIPart[];
+      startIndex: number;
+      renderKey: string;
+    }
+  | {
+      type: "reasoning-group";
+      parts: ReasoningMessagePart[];
       startIndex: number;
       renderKey: string;
     };
@@ -509,6 +520,13 @@ function getPartIdentity(part: WebAgentUIMessagePart): string {
   return `part:${part.type}`;
 }
 
+function getReasoningGroupText(parts: ReasoningMessagePart[]): string {
+  return parts
+    .map((part) => part.text)
+    .filter((text) => text.trim().length > 0)
+    .join("\n\n");
+}
+
 type CreateSandboxResponse = SandboxInfo & {
   type: string;
 };
@@ -528,7 +546,7 @@ async function createSandbox(
       branch: cloneUrl ? (branch ?? "main") : undefined,
       isNewBranch: cloneUrl ? isNewBranch : false,
       sessionId,
-      sandboxType: sandboxType ?? "hybrid",
+      sandboxType: sandboxType ?? "vercel",
     }),
   });
   if (!response.ok) {
@@ -1407,6 +1425,8 @@ export function SessionChatContent({
       let currentTaskGroup: TaskToolUIPart[] = [];
       let taskGroupStartIndex = 0;
       let taskGroupOrdinal = 0;
+      let currentReasoningGroup: ReasoningMessagePart[] = [];
+      let reasoningGroupStartIndex = 0;
       const partIdentityCounts = new Map<string, number>();
       const isStreaming =
         isChatInFlight && messageIndex === renderMessages.length - 1;
@@ -1441,8 +1461,21 @@ export function SessionChatContent({
         taskGroupOrdinal += 1;
       };
 
+      const flushReasoningGroup = () => {
+        if (currentReasoningGroup.length === 0) return;
+
+        groups.push({
+          type: "reasoning-group",
+          parts: currentReasoningGroup,
+          startIndex: reasoningGroupStartIndex,
+          renderKey: `reasoning-group:${getStablePartRenderKey(currentReasoningGroup[0])}`,
+        });
+        currentReasoningGroup = [];
+      };
+
       message.parts.forEach((part, index) => {
         if (isToolUIPart(part) && part.type === "tool-task") {
+          flushReasoningGroup();
           if (currentTaskGroup.length === 0) {
             taskGroupStartIndex = index;
           }
@@ -1450,7 +1483,17 @@ export function SessionChatContent({
           return;
         }
 
+        if (isReasoningUIPart(part)) {
+          flushTaskGroup();
+          if (currentReasoningGroup.length === 0) {
+            reasoningGroupStartIndex = index;
+          }
+          currentReasoningGroup.push(part);
+          return;
+        }
+
         flushTaskGroup();
+        flushReasoningGroup();
         groups.push({
           type: "part",
           part,
@@ -1460,6 +1503,7 @@ export function SessionChatContent({
       });
 
       flushTaskGroup();
+      flushReasoningGroup();
 
       const hiddenActivitySummary = createHiddenActivitySummary();
 
@@ -1477,6 +1521,12 @@ export function SessionChatContent({
               isStreaming,
             );
           }
+          continue;
+        }
+
+        if (group.type === "reasoning-group") {
+          hiddenActivitySummary.hasHiddenContent = true;
+          hiddenActivitySummary.hasReasoning = true;
           continue;
         }
 
@@ -2184,14 +2234,14 @@ export function SessionChatContent({
     }
   }, [isChatInFlight]);
 
-  // After a chat turn completes, immediately sync status from the server.
-  // If the sandbox was hibernated during the turn (tool calls failed), this
-  // updates the UI right away instead of waiting for the next 15s poll.
+  // After a chat turn completes, immediately sync state from the server.
+  // Auto-commit itself runs server-side so it still happens when this page is
+  // not open; the client just reconciles git, diff, and PR state.
   // Initialize to null (not `status`) so the first render always reconciles.
   // When navigating back to a chat whose stream finished in the background,
   // status is already "ready" but the optimistic streaming overlay may still
-  // be set.  Starting from null makes `becameReady` true on mount, which
-  // clears the stale overlay immediately.
+  // be set. Starting from null makes `becameReady` true on mount, which clears
+  // the stale overlay immediately.
   const prevStatusRef = useRef<string | null>(null);
   useEffect(() => {
     const prevStatus = prevStatusRef.current;
@@ -2201,6 +2251,7 @@ export function SessionChatContent({
     const becameError = status === "error" && prevStatus !== "error";
     const shouldClearStreaming = status === "error" || becameReady;
     prevStatusRef.current = status;
+
     // Skip clearing the streaming overlay during unmount. Route teardown aborts
     // local transport connections, which can still trigger a transient status
     // transition before React finishes unmounting. Clearing here would remove
@@ -2217,18 +2268,37 @@ export function SessionChatContent({
     if (becameReady) {
       pendingOptimisticTitleChatIdRef.current = null;
     }
+
+    let followUpTimeout: ReturnType<typeof setTimeout> | null = null;
     if (
       (wasStreaming || wasSubmitted) &&
       status === "ready" &&
       isMountedRef.current
     ) {
-      void requestStatusSync("force");
-      void refreshGitStatus().catch(() => {});
+      const refreshCompletedTurnState = async () => {
+        await requestStatusSync("force").catch(() => undefined);
+        await refreshGitStatus().catch(() => undefined);
+        await refreshDiff().catch(() => undefined);
+        await refreshFiles().catch(() => undefined);
+        await checkBranchAndPr().catch(() => undefined);
+      };
+
+      void refreshCompletedTurnState();
       void requestMarkChatRead("force");
       void refreshChats();
-      // After a message completes, check branch and detect existing PRs
-      void checkBranchAndPr();
+
+      if (session.cloneUrl && session.repoOwner && session.repoName) {
+        followUpTimeout = setTimeout(() => {
+          void refreshCompletedTurnState();
+        }, 3000);
+      }
     }
+
+    return () => {
+      if (followUpTimeout !== null) {
+        clearTimeout(followUpTimeout);
+      }
+    };
   }, [
     status,
     chatInfo.id,
@@ -2236,10 +2306,14 @@ export function SessionChatContent({
     clearChatTitle,
     requestStatusSync,
     refreshGitStatus,
+    refreshDiff,
+    refreshFiles,
+    checkBranchAndPr,
     requestMarkChatRead,
     refreshChats,
-    checkBranchAndPr,
-    router,
+    session.cloneUrl,
+    session.repoOwner,
+    session.repoName,
   ]);
 
   // Track whether we've auto-attempted sandbox startup for this page load.
@@ -2797,27 +2871,41 @@ export function SessionChatContent({
                       )}
                     </Button>
                   ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 px-0 xl:w-auto xl:px-3"
-                      onClick={openPreviewOrPr}
-                      disabled={!prDeploymentUrl && !existingPrUrl}
-                    >
-                      {prDeploymentUrl ? (
-                        <>
-                          <ExternalLink className="h-4 w-4 xl:mr-2" />
-                          <span className="hidden xl:inline">Preview</span>
-                        </>
-                      ) : (
-                        <>
-                          <GitPullRequest className="h-4 w-4 xl:mr-2" />
-                          <span className="hidden xl:inline">
-                            View PR #{session.prNumber}
-                          </span>
-                        </>
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-8 px-0 xl:w-auto xl:px-3"
+                        onClick={openPreviewOrPr}
+                        disabled={!prDeploymentUrl && !existingPrUrl}
+                      >
+                        {prDeploymentUrl ? (
+                          <>
+                            <ExternalLink className="h-4 w-4 xl:mr-2" />
+                            <span className="hidden xl:inline">Preview</span>
+                          </>
+                        ) : (
+                          <>
+                            <GitPullRequest className="h-4 w-4 xl:mr-2" />
+                            <span className="hidden xl:inline">
+                              View PR #{session.prNumber}
+                            </span>
+                          </>
+                        )}
+                      </Button>
+                      {prDeploymentUrl && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="hidden h-8 px-3 xl:inline-flex"
+                          onClick={openExistingPr}
+                          disabled={!existingPrUrl}
+                        >
+                          <GitPullRequest className="mr-2 h-4 w-4" />
+                          View PR #{session.prNumber}
+                        </Button>
                       )}
-                    </Button>
+                    </>
                   )
                 ) : showCommitAction ? (
                   <Button
@@ -3167,6 +3255,30 @@ export function SessionChatContent({
                                     reason,
                                   })
                                 }
+                              />
+                            </div>
+                          );
+                        }
+
+                        if (group.type === "reasoning-group") {
+                          if (hideToolDetails && m.role === "assistant") {
+                            return null;
+                          }
+
+                          return (
+                            <div
+                              key={`${m.id}-${group.renderKey}`}
+                              className="flex justify-start"
+                            >
+                              <ThinkingBlock
+                                text={getReasoningGroupText(group.parts)}
+                                isStreaming={
+                                  isMessageStreaming &&
+                                  group.parts.some(
+                                    (part) => part.state === "streaming",
+                                  )
+                                }
+                                partCount={group.parts.length}
                               />
                             </div>
                           );

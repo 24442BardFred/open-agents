@@ -10,7 +10,8 @@ let isAuthenticated = true;
 interface MockPreferences {
   defaultModelId: string;
   defaultSubagentModelId: string | null;
-  defaultSandboxType: "hybrid" | "vercel" | "just-bash";
+  defaultSandboxType: "vercel";
+  defaultDiffMode: "unified" | "split";
   modelVariants: ModelVariant[];
 }
 
@@ -21,6 +22,7 @@ function resetPreferences() {
     defaultModelId: "anthropic/claude-haiku-4.5",
     defaultSubagentModelId: null,
     defaultSandboxType: "vercel",
+    defaultDiffMode: "unified",
     modelVariants: [],
   };
 }

@@ -18,6 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  type DiffMode,
+  useUserPreferences,
+} from "@/hooks/use-user-preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { defaultDiffOptions, splitDiffOptions } from "@/lib/diffs-config";
 import { cn } from "@/lib/utils";
@@ -28,7 +32,7 @@ type DiffViewerProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-type DiffStyle = "unified" | "split";
+type DiffStyle = DiffMode;
 
 function formatTimestamp(date: Date) {
   return date.toLocaleString("en-US", {
@@ -201,6 +205,7 @@ export function DiffViewer({ open, onOpenChange }: DiffViewerProps) {
     refreshDiff,
   } = useSessionChatContext();
   const isMobile = useIsMobile();
+  const { preferences } = useUserPreferences();
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
 
@@ -230,10 +235,17 @@ export function DiffViewer({ open, onOpenChange }: DiffViewerProps) {
   };
 
   useEffect(() => {
-    if (isMobile && diffStyle !== "unified") {
-      setDiffStyle("unified");
+    if (!open) {
+      return;
     }
-  }, [diffStyle, isMobile]);
+
+    if (isMobile) {
+      setDiffStyle("unified");
+      return;
+    }
+
+    setDiffStyle(preferences?.defaultDiffMode ?? "unified");
+  }, [open, isMobile, preferences?.defaultDiffMode]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

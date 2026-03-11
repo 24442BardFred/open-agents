@@ -30,7 +30,9 @@ import {
 } from "@/lib/db/sessions";
 import { recordUsage } from "@/lib/db/usage";
 import { getUserPreferences } from "@/lib/db/user-preferences";
+import { runAutoCommitInBackground } from "@/lib/chat-auto-commit";
 import { getRepoToken } from "@/lib/github/get-repo-token";
+import { getCachedSkills, setCachedSkills } from "@/lib/skills-cache";
 import { getUserGitHubToken } from "@/lib/github/user-token";
 import { resolveModelSelection } from "@/lib/model-variants";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
@@ -104,14 +106,9 @@ function extractLastInputTokensFromMessages(
 }
 
 const STREAM_TOKEN_SEPARATOR = ":";
-const SKILLS_CACHE_TTL_MS = 60_000;
 
 type DiscoveredSkills = Awaited<ReturnType<typeof discoverSkills>>;
 
-const discoveredSkillsCache = new Map<
-  string,
-  { skills: DiscoveredSkills; expiresAt: number }
->();
 const remoteAuthFingerprintBySessionId = new Map<string, string>();
 
 const createStreamToken = (startedAtMs: number) =>
@@ -119,17 +116,6 @@ const createStreamToken = (startedAtMs: number) =>
 
 const getRemoteAuthFingerprint = (authUrl: string) =>
   createHash("sha256").update(authUrl).digest("hex");
-
-const getSkillCacheKey = (sessionId: string, workingDirectory: string) =>
-  `${sessionId}:${workingDirectory}`;
-
-const pruneExpiredSkillCache = (now: number) => {
-  for (const [key, entry] of discoveredSkillsCache) {
-    if (entry.expiresAt <= now) {
-      discoveredSkillsCache.delete(key);
-    }
-  }
-};
 
 const parseStreamTokenStartedAt = (streamToken: string | null) => {
   if (!streamToken) {
@@ -180,6 +166,34 @@ function refreshCachedDiffInBackground(req: Request, sessionId: string): void {
           error,
         );
       }),
+  );
+}
+
+function scheduleAutoCommitInBackground(
+  req: Request,
+  params: {
+    sessionId: string;
+    sessionTitle: string;
+    repoOwner: string;
+    repoName: string;
+  },
+): void {
+  const cookieHeader = req.headers.get("cookie");
+  if (!cookieHeader) {
+    return;
+  }
+
+  after(
+    runAutoCommitInBackground({
+      requestUrl: req.url,
+      cookieHeader,
+      ...params,
+    }).catch((error) => {
+      console.error(
+        `[chat] Auto commit background task failed for session ${params.sessionId}:`,
+        error,
+      );
+    }),
   );
 }
 
@@ -303,20 +317,18 @@ export async function POST(req: Request) {
   const skillDirs = skillBaseFolders.map(
     (folder) => `${sandbox.workingDirectory}/${folder}/skills`,
   );
-  const now = Date.now();
-  pruneExpiredSkillCache(now);
-  const skillCacheKey = getSkillCacheKey(sessionId, sandbox.workingDirectory);
-  const cachedSkills = discoveredSkillsCache.get(skillCacheKey);
+
+  const cachedSkills = await getCachedSkills(
+    sessionId,
+    sessionRecord.sandboxState,
+  );
 
   let skills: DiscoveredSkills;
-  if (cachedSkills && cachedSkills.expiresAt > now) {
-    skills = cachedSkills.skills;
+  if (cachedSkills !== null) {
+    skills = cachedSkills;
   } else {
     skills = await discoverSkills(sandbox, skillDirs);
-    discoveredSkillsCache.set(skillCacheKey, {
-      skills,
-      expiresAt: now + SKILLS_CACHE_TTL_MS,
-    });
+    await setCachedSkills(sessionId, sessionRecord.sandboxState, skills);
   }
 
   let ownedStreamToken = createStreamToken(requestStartedAtMs);
@@ -489,7 +501,9 @@ export async function POST(req: Request) {
   // We intentionally do not bind `req.signal` so a transient client disconnect
   // does not cancel work; clients can reconnect via resumable streams.
   const controller = new AbortController();
+  let shouldAutoCommitOnFinish = true;
   const unsubscribeStop = await onStopSignal(chatId, () => {
+    shouldAutoCommitOnFinish = false;
     controller.abort();
   });
 
@@ -498,6 +512,7 @@ export async function POST(req: Request) {
   const PRE_TIMEOUT_MS = 730_000;
   const timeoutHandle = setTimeout(() => {
     console.warn("[chat] Aborting before maxDuration timeout");
+    shouldAutoCommitOnFinish = false;
     controller.abort();
   }, PRE_TIMEOUT_MS);
 
@@ -653,41 +668,13 @@ export async function POST(req: Request) {
         }
 
         // Persist sandbox state
-        // For hybrid sandboxes, we need to be careful not to overwrite the sandboxId
-        // that may have been set by background work (the onCloudSandboxReady hook)
         if (sandbox.getState) {
           try {
-            const currentState = sandbox.getState() as SandboxState;
-            let sandboxStateToPersist = currentState;
-
-            // For hybrid sandboxes in pre-handoff state (has files, no sandboxId),
-            // check if background work has already set a sandboxId we should preserve
-            if (
-              currentState.type === "hybrid" &&
-              "files" in currentState &&
-              !currentState.sandboxId
-            ) {
-              const currentSession = await getSessionById(sessionId);
-              if (
-                currentSession?.sandboxState?.type === "hybrid" &&
-                currentSession.sandboxState.sandboxId
-              ) {
-                // Background work has completed - use the sandboxId from DB
-                // but also include pending operations from this session
-                sandboxStateToPersist = {
-                  type: "hybrid",
-                  sandboxId: currentSession.sandboxState.sandboxId,
-                  pendingOperations:
-                    "pendingOperations" in currentState
-                      ? currentState.pendingOperations
-                      : undefined,
-                };
-              }
-            }
+            const sandboxState = sandbox.getState() as SandboxState;
 
             await updateSession(sessionId, {
-              sandboxState: sandboxStateToPersist,
-              ...buildActiveLifecycleUpdate(sandboxStateToPersist, {
+              sandboxState,
+              ...buildActiveLifecycleUpdate(sandboxState, {
                 activityAt,
               }),
             });
@@ -734,6 +721,21 @@ export async function POST(req: Request) {
 
         // Keep offline diff cache warm even when the chat page is not open.
         refreshCachedDiffInBackground(req, sessionId);
+
+        if (
+          shouldAutoCommitOnFinish &&
+          preferences?.autoCommitPush &&
+          sessionRecord.cloneUrl &&
+          sessionRecord.repoOwner &&
+          sessionRecord.repoName
+        ) {
+          scheduleAutoCommitInBackground(req, {
+            sessionId,
+            sessionTitle: sessionRecord.title,
+            repoOwner: sessionRecord.repoOwner,
+            repoName: sessionRecord.repoName,
+          });
+        }
 
         const subagentUsageEvents = collectTaskToolUsageEvents(responseMessage);
         if (subagentUsageEvents.length === 0) {
