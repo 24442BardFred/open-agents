@@ -232,7 +232,7 @@ export function TaskRenderer({
     <div className="space-y-3">
       {/* Live tool activity when running */}
       {currentToolLabel && (
-        <div className="text-[13px] text-muted-foreground">
+        <div className="font-mono text-xs text-muted-foreground">
           {currentToolLabel}
         </div>
       )}
