@@ -1,8 +1,10 @@
 import { createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { start } from "workflow/api";
-import { webAgent } from "@/app/config";
 import type { WebAgentUIMessage } from "@/app/types";
-import { updateSession } from "@/lib/db/sessions";
+import {
+  updateChatActiveStreamId,
+  updateSession,
+} from "@/lib/db/sessions";
 import { getUserPreferences } from "@/lib/db/user-preferences";
 import { createCancelableReadableStream } from "@/lib/chat/create-cancelable-readable-stream";
 import { buildActiveLifecycleUpdate } from "@/lib/sandbox/lifecycle";
@@ -118,6 +120,9 @@ export async function POST(req: Request) {
       },
     },
   ]);
+
+  // Store the workflow run ID so clients can reconnect and stop.
+  await updateChatActiveStreamId(chatId, run.runId);
 
   const stream = createCancelableReadableStream(
     run.getReadable<WebAgentUIMessageChunk>(),

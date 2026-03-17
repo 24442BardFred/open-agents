@@ -16,6 +16,7 @@ import {
   touchChat,
   updateChat,
   isFirstChatMessage,
+  updateChatActiveStreamId,
   upsertChatMessageScoped,
   updateChatAssistantActivity,
 } from "@/lib/db/sessions";
@@ -126,6 +127,15 @@ async function persistAssistantMessage(
   }
 }
 
+async function clearActiveStream(chatId: string): Promise<void> {
+  "use step";
+  try {
+    await updateChatActiveStreamId(chatId, null);
+  } catch (error) {
+    console.error("[workflow] Failed to clear activeStreamId:", error);
+  }
+}
+
 export async function runAgentWorkflow(options: Options) {
   "use workflow";
 
@@ -202,6 +212,7 @@ export async function runAgentWorkflow(options: Options) {
     await persistAssistantMessage(options.chatId, pendingAssistantResponse);
   }
 
+  await clearActiveStream(options.chatId);
   await sendFinish(writable);
   await closeStream(writable);
 }
