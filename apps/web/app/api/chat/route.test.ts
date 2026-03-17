@@ -26,7 +26,7 @@ let isSandboxActive = true;
 
 const originalFetch = globalThis.fetch;
 
-globalThis.fetch = (async (input: RequestInfo | URL) => {
+globalThis.fetch = (async (_input: RequestInfo | URL) => {
   return new Response("{}", {
     status: 200,
     headers: {

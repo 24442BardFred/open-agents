@@ -105,6 +105,8 @@ export async function POST(req: Request) {
     {
       messages,
       chatId,
+      userId,
+      modelId: mainModelSelection.id,
       agentOptions: {
         sandbox: {
           state: activeSandboxState,

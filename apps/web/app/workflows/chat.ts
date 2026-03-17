@@ -3,32 +3,44 @@ import {
   type FinishReason,
   generateId as generateIdAi,
   isToolUIPart,
+  type LanguageModelUsage,
   type ModelMessage,
   type UIMessageChunk,
 } from "ai";
+import {
+  addLanguageModelUsage,
+  collectTaskToolUsageEvents,
+  sumLanguageModelUsage,
+} from "@open-harness/agent";
+import type { OpenHarnessAgentCallOptions } from "@open-harness/agent";
 import { getWorkflowMetadata, getWritable } from "workflow";
 import { getRun } from "workflow/api";
 import { webAgent } from "@/app/config";
 import type { WebAgentUIMessage, WebAgentMessageMetadata } from "@/app/types";
-import type { OpenHarnessAgentCallOptions } from "@open-harness/agent";
 import {
+  compareAndSetChatActiveStreamId,
   createChatMessageIfNotExists,
   touchChat,
   updateChat,
   isFirstChatMessage,
-  updateChatActiveStreamId,
   upsertChatMessageScoped,
   updateChatAssistantActivity,
 } from "@/lib/db/sessions";
+import { recordUsage } from "@/lib/db/usage";
 
 type Options = {
   messages: WebAgentUIMessage[];
   chatId: string;
+  userId: string;
+  modelId: string;
   agentOptions: OpenHarnessAgentCallOptions;
   maxSteps?: number;
 };
 
 type Writable = WritableStream<UIMessageChunk>;
+
+const cachedInputTokensFor = (usage: LanguageModelUsage) =>
+  usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
 
 const shouldPauseForToolInteraction = (parts: WebAgentUIMessage["parts"]) =>
   parts.some(
@@ -127,12 +139,77 @@ async function persistAssistantMessage(
   }
 }
 
-async function clearActiveStream(chatId: string): Promise<void> {
+async function clearActiveStream(
+  chatId: string,
+  workflowRunId: string,
+): Promise<void> {
   "use step";
   try {
-    await updateChatActiveStreamId(chatId, null);
+    // Only clear if this workflow's run ID is still the active one.
+    // Prevents a late-finishing workflow from clearing a newer workflow's ID.
+    await compareAndSetChatActiveStreamId(chatId, workflowRunId, null);
   } catch (error) {
     console.error("[workflow] Failed to clear activeStreamId:", error);
+  }
+}
+
+async function recordWorkflowUsage(
+  userId: string,
+  modelId: string,
+  totalUsage: LanguageModelUsage | undefined,
+  responseMessage: WebAgentUIMessage,
+): Promise<void> {
+  "use step";
+
+  try {
+    // Record main agent usage
+    if (totalUsage) {
+      await recordUsage(userId, {
+        source: "web",
+        agentType: "main",
+        model: modelId,
+        messages: [responseMessage],
+        usage: {
+          inputTokens: totalUsage.inputTokens ?? 0,
+          cachedInputTokens: cachedInputTokensFor(totalUsage),
+          outputTokens: totalUsage.outputTokens ?? 0,
+        },
+      });
+    }
+
+    // Record subagent usage (aggregated by model)
+    const subagentUsageEvents = collectTaskToolUsageEvents(responseMessage);
+    if (subagentUsageEvents.length > 0) {
+      const subagentUsageByModel = new Map<string, LanguageModelUsage>();
+      for (const event of subagentUsageEvents) {
+        const eventModelId = event.modelId ?? modelId;
+        if (!eventModelId) {
+          continue;
+        }
+
+        const existing = subagentUsageByModel.get(eventModelId);
+        const combined = sumLanguageModelUsage(existing, event.usage);
+        if (combined) {
+          subagentUsageByModel.set(eventModelId, combined);
+        }
+      }
+
+      for (const [eventModelId, usage] of subagentUsageByModel) {
+        await recordUsage(userId, {
+          source: "web",
+          agentType: "subagent",
+          model: eventModelId,
+          messages: [],
+          usage: {
+            inputTokens: usage.inputTokens ?? 0,
+            cachedInputTokens: cachedInputTokensFor(usage),
+            outputTokens: usage.outputTokens ?? 0,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error("[workflow] Failed to record usage:", error);
   }
 }
 
@@ -174,8 +251,8 @@ export async function runAgentWorkflow(options: Options) {
 
   await sendStart(writable, assistantId);
 
-  let finishReason: FinishReason = "stop";
   let wasAborted = false;
+  let totalUsage: LanguageModelUsage | undefined;
 
   for (
     let step = 0;
@@ -195,8 +272,13 @@ export async function runAgentWorkflow(options: Options) {
       result.responseMessage ?? pendingAssistantResponse;
     originalMessagesForStep = [pendingAssistantResponse];
     modelMessages.push(...result.responseMessages);
-    finishReason = result.finishReason;
     wasAborted = wasAborted || result.stepWasAborted;
+
+    if (result.stepUsage) {
+      totalUsage = totalUsage
+        ? addLanguageModelUsage(totalUsage, result.stepUsage)
+        : result.stepUsage;
+    }
 
     if (
       result.finishReason !== "tool-calls" ||
@@ -212,7 +294,14 @@ export async function runAgentWorkflow(options: Options) {
     await persistAssistantMessage(options.chatId, pendingAssistantResponse);
   }
 
-  await clearActiveStream(options.chatId);
+  await recordWorkflowUsage(
+    options.userId,
+    options.modelId,
+    totalUsage,
+    pendingAssistantResponse,
+  );
+
+  await clearActiveStream(options.chatId, workflowRunId);
   await sendFinish(writable);
   await closeStream(writable);
 }
@@ -232,6 +321,7 @@ const runAgentStep = async (
 
   try {
     let responseMessage: WebAgentUIMessage | undefined;
+    let lastStepUsage: LanguageModelUsage | undefined;
 
     const result = await webAgent.stream({
       messages,
@@ -244,6 +334,16 @@ const runAgentStep = async (
       generateMessageId: () => messageId,
       sendStart: false,
       sendFinish: false,
+      messageMetadata: ({ part: streamPart }) => {
+        if (streamPart.type === "finish-step") {
+          lastStepUsage = streamPart.usage;
+          return {
+            lastStepUsage,
+            totalMessageUsage: undefined,
+          } satisfies WebAgentMessageMetadata;
+        }
+        return undefined;
+      },
       onFinish: ({ responseMessage: finishedResponseMessage }) => {
         responseMessage = finishedResponseMessage;
       },
@@ -257,10 +357,13 @@ const runAgentStep = async (
       throw new Error("Agent stream finished without a response message");
     }
 
+    const stepUsage = await result.totalUsage;
+
     return {
       responseMessage,
       responseMessages: (await result.response).messages,
       finishReason: await result.finishReason,
+      stepUsage,
       stepWasAborted: false,
     };
   } catch (error) {
@@ -270,6 +373,7 @@ const runAgentStep = async (
         responseMessage: undefined,
         responseMessages: [],
         finishReason: abortedFinishReason,
+        stepUsage: undefined,
         stepWasAborted: true,
       };
     }
