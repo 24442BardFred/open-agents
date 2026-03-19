@@ -225,6 +225,7 @@ const runAgentStep = async (
   try {
     let responseMessage: WebAgentUIMessage | undefined;
     let lastStepUsage: LanguageModelUsage | undefined;
+    let lastStepFinishReason: FinishReason | undefined;
     let lastStepRawFinishReason: string | undefined;
     const lastOriginalMessage = originalMessages.at(-1);
     const existingStepFinishReasons: WebAgentStepFinishMetadata[] =
@@ -247,6 +248,7 @@ const runAgentStep = async (
       messageMetadata: ({ part: streamPart }) => {
         if (streamPart.type === "finish-step") {
           lastStepUsage = streamPart.usage;
+          lastStepFinishReason = streamPart.finishReason;
           lastStepRawFinishReason = streamPart.rawFinishReason;
           stepFinishReasons = [
             ...stepFinishReasons,
@@ -278,13 +280,53 @@ const runAgentStep = async (
       throw new Error("Agent stream finished without a response message");
     }
 
-    const stepUsage = await result.totalUsage;
+    const [stepUsage, finishReason, resultRawFinishReason, response] =
+      await Promise.all([
+        result.totalUsage,
+        result.finishReason,
+        result.rawFinishReason,
+        result.response,
+      ]);
+
+    const rawFinishReason = lastStepRawFinishReason ?? resultRawFinishReason;
+    const normalizedStepFinishReasons =
+      stepFinishReasons.length === existingStepFinishReasons.length
+        ? [
+            ...stepFinishReasons,
+            {
+              finishReason,
+              rawFinishReason,
+            },
+          ]
+        : stepFinishReasons.map((stepFinishMetadata, index) =>
+            index === stepFinishReasons.length - 1 &&
+            stepFinishMetadata.rawFinishReason == null &&
+            rawFinishReason != null &&
+            (lastStepFinishReason == null ||
+              stepFinishMetadata.finishReason === lastStepFinishReason)
+              ? {
+                  ...stepFinishMetadata,
+                  rawFinishReason,
+                }
+              : stepFinishMetadata,
+          );
+
+    responseMessage = {
+      ...responseMessage,
+      metadata: {
+        ...responseMessage.metadata,
+        lastStepUsage: lastStepUsage ?? stepUsage,
+        lastStepFinishReason: finishReason,
+        lastStepRawFinishReason: rawFinishReason,
+        stepFinishReasons: normalizedStepFinishReasons,
+      } satisfies WebAgentMessageMetadata,
+    };
 
     return {
       responseMessage,
-      responseMessages: (await result.response).messages,
-      finishReason: await result.finishReason,
-      rawFinishReason: lastStepRawFinishReason,
+      responseMessages: response.messages,
+      finishReason,
+      rawFinishReason,
       stepUsage,
       stepWasAborted: false,
     };
