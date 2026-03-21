@@ -20,7 +20,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useSidebar } from "@/components/ui/sidebar";
 import { useSession } from "@/hooks/use-session";
 import type { SessionWithUnread } from "@/hooks/use-sessions";
 import type { Session as AuthSession } from "@/lib/session/types";
@@ -56,7 +55,7 @@ const ARCHIVED_SESSIONS_PAGE_SIZE = 50;
 
 const sessionRowPerformanceStyle: CSSProperties = {
   contentVisibility: "auto",
-  containIntrinsicSize: "3.5rem",
+  containIntrinsicSize: "3.25rem",
 };
 
 function formatRelativeTime(date: Date): string {
@@ -197,7 +196,7 @@ const SessionRow = memo(function SessionRow({
   return (
     <div
       className={cn(
-        "group relative flex w-full items-start gap-2.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors",
+        "group relative flex w-full items-start gap-2.5 border-b border-border/50 px-4 py-2.5 text-left transition-colors",
         isActive ? "bg-accent/50" : "hover:bg-accent/30",
         isPending ? "opacity-70" : "opacity-100",
       )}
@@ -220,7 +219,7 @@ const SessionRow = memo(function SessionRow({
           className="block w-full text-left"
           aria-busy={isPending}
         >
-          <div className="flex min-w-0 items-baseline gap-2 pr-6">
+          <div className="flex min-w-0 items-baseline gap-3 pr-6">
             <p
               className={cn(
                 "min-w-0 flex-1 truncate text-[13px] leading-5",
@@ -231,23 +230,20 @@ const SessionRow = memo(function SessionRow({
             >
               {session.title}
             </p>
-            <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              {meta ? (
+                <span className="hidden truncate font-mono sm:inline">
+                  {meta}
+                </span>
+              ) : null}
+              <DiffStats
+                added={session.linesAdded}
+                removed={session.linesRemoved}
+              />
               {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-              <span>{lastActivityLabel}</span>
+              <span className="tabular-nums">{lastActivityLabel}</span>
             </span>
           </div>
-
-          {meta ? (
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="min-w-0 truncate font-mono">{meta}</span>
-              <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                <DiffStats
-                  added={session.linesAdded}
-                  removed={session.linesRemoved}
-                />
-              </span>
-            </div>
-          ) : null}
         </button>
       </div>
 
@@ -256,7 +252,7 @@ const SessionRow = memo(function SessionRow({
           <button
             type="button"
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-1.5 top-2.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
+            className="absolute right-2 top-2.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
             aria-label={`Open menu for ${session.title}`}
           >
             <EllipsisVertical className="h-3.5 w-3.5" />
@@ -324,7 +320,6 @@ export function InboxSidebar({
 }: InboxSidebarProps) {
   const router = useRouter();
   const { session } = useSession();
-  const { isMobile, setOpenMobile } = useSidebar();
   const [showArchived, setShowArchived] = useState(false);
   const [activeFilter, setActiveFilter] = useState<InboxFilter>("action");
   const [archivedSessions, setArchivedSessions] = useState<SessionWithUnread[]>(
@@ -448,12 +443,9 @@ export function InboxSidebar({
 
   const handleSessionClick = useCallback(
     (targetSession: SessionWithUnread) => {
-      if (isMobile) {
-        setOpenMobile(false);
-      }
       onSessionClick(targetSession);
     },
-    [isMobile, onSessionClick, setOpenMobile],
+    [onSessionClick],
   );
 
   const handleSessionPrefetch = useCallback(
@@ -534,93 +526,136 @@ export function InboxSidebar({
   return (
     <>
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+      <div className="flex items-center gap-3 border-b border-border px-4 py-2">
         <span className="text-sm font-medium text-foreground">Inbox</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={onOpenNewSession}
-          className="h-7 w-7"
-          aria-label="New session"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
 
-      {/* Tabs: Inbox / Archive */}
-      <div className="flex border-b border-border">
-        <button
-          type="button"
-          onClick={() => setShowArchived(false)}
-          className={cn(
-            "flex-1 px-3 py-1.5 text-xs font-medium transition-colors",
-            !showArchived
-              ? "border-b-2 border-foreground text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          Active
-          {counts.total > 0 ? (
-            <span className="ml-1.5 text-muted-foreground">{counts.total}</span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowArchived(true)}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors",
-            showArchived
-              ? "border-b-2 border-foreground text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Archive className="h-3 w-3" />
-          Archive
-          {archivedCount > 0 ? (
-            <span className="ml-1 text-muted-foreground">{archivedCount}</span>
-          ) : null}
-        </button>
-      </div>
-
-      {/* Filters (only when viewing active) */}
-      {!showArchived ? (
-        <div className="flex gap-1 border-b border-border px-2 py-1.5">
-          {(
-            [
-              { key: "action", label: "Action", count: counts.needsAction },
-              { key: "waiting", label: "Waiting", count: counts.waiting },
-              { key: "all", label: "All", count: counts.total },
-            ] as const
-          ).map((filter) => (
-            <button
-              key={filter.key}
-              type="button"
-              onClick={() => setActiveFilter(filter.key)}
-              className={cn(
-                "rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-                activeFilter === filter.key
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {filter.label}
-              {filter.count > 0 ? (
-                <span className="ml-1 tabular-nums text-muted-foreground">
-                  {filter.count}
-                </span>
-              ) : null}
-            </button>
-          ))}
+        {/* Tabs inline */}
+        <div className="flex gap-px">
+          <button
+            type="button"
+            onClick={() => setShowArchived(false)}
+            className={cn(
+              "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+              !showArchived
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Active
+            {counts.total > 0 ? (
+              <span className="ml-1 tabular-nums text-muted-foreground">
+                {counts.total}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowArchived(true)}
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+              showArchived
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Archive className="h-3 w-3" />
+            Archive
+            {archivedCount > 0 ? (
+              <span className="ml-0.5 tabular-nums text-muted-foreground">
+                {archivedCount}
+              </span>
+            ) : null}
+          </button>
         </div>
-      ) : null}
+
+        {/* Filters */}
+        {!showArchived ? (
+          <div className="ml-auto flex gap-px">
+            {(
+              [
+                { key: "action", label: "Action", count: counts.needsAction },
+                { key: "waiting", label: "Waiting", count: counts.waiting },
+                { key: "all", label: "All", count: counts.total },
+              ] as const
+            ).map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => setActiveFilter(filter.key)}
+                className={cn(
+                  "rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+                  activeFilter === filter.key
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {filter.label}
+                {filter.count > 0 ? (
+                  <span className="ml-1 tabular-nums text-muted-foreground">
+                    {filter.count}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="ml-auto" />
+        )}
+
+        {/* User + New session */}
+        <div className="flex items-center gap-1">
+          {sidebarUser ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => router.push("/settings")}
+              aria-label="Open settings"
+            >
+              <Avatar className="h-5 w-5">
+                {sidebarUser.avatar ? (
+                  <AvatarImage
+                    src={sidebarUser.avatar}
+                    alt={sidebarUser.username}
+                  />
+                ) : null}
+                <AvatarFallback className="text-[8px]">
+                  {getAvatarFallback(sidebarUser.username)}
+                </AvatarFallback>
+              </Avatar>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => router.push("/settings")}
+              aria-label="Open settings"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onOpenNewSession}
+            className="h-7 w-7"
+            aria-label="New session"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
       {/* Session list */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {showLoadingSkeleton ? (
           <div className="space-y-px">
             {Array.from({ length: 8 }).map((_, index) => (
-              <div key={index} className="space-y-1.5 px-3 py-2.5">
+              <div key={index} className="space-y-1.5 px-4 py-2.5">
                 <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
                 <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
               </div>
@@ -690,40 +725,6 @@ export function InboxSidebar({
           </>
         )}
       </div>
-
-      {/* User footer */}
-      {sidebarUser ? (
-        <div className="border-t border-border p-2">
-          <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-            <Avatar className="h-7 w-7 shrink-0">
-              {sidebarUser.avatar ? (
-                <AvatarImage
-                  src={sidebarUser.avatar}
-                  alt={sidebarUser.username}
-                />
-              ) : null}
-              <AvatarFallback className="text-[10px]">
-                {getAvatarFallback(sidebarUser.username)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-foreground">
-                {sidebarUser.username}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={() => router.push("/settings")}
-              aria-label="Open settings"
-            >
-              <Settings className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-      ) : null}
 
       <InboxSidebarRenameDialog
         session={renameDialogSession}

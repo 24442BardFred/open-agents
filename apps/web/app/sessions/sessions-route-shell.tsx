@@ -1,9 +1,8 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
-  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -13,15 +12,11 @@ import {
 } from "react";
 import { InboxSidebar } from "@/components/inbox-sidebar";
 import { NewSessionDialog } from "@/components/new-session-dialog";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { useBackgroundChatNotifications } from "@/hooks/use-background-chat-notifications";
 import { useSessions, type SessionWithUnread } from "@/hooks/use-sessions";
 import type { Session as AuthSession } from "@/lib/session/types";
+import { cn } from "@/lib/utils";
 import { SessionsShellProvider } from "./sessions-shell-context";
 
 type SessionsRouteShellProps = {
@@ -33,18 +28,6 @@ type SessionsRouteShellProps = {
   };
   lastRepo: { owner: string; repo: string } | null;
 };
-
-const RouteContentShell = memo(function RouteContentShell({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  return (
-    <SidebarInset className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      {children}
-    </SidebarInset>
-  );
-});
 
 export function SessionsRouteShell({
   children,
@@ -143,8 +126,16 @@ export function SessionsRouteShell({
 
   const activeSessionId = optimisticActiveSessionId ?? routeSessionId ?? "";
   const pendingSessionId = isNavigating ? optimisticActiveSessionId : null;
+  const panelOpen = Boolean(routeSessionId);
 
   useBackgroundChatNotifications(sessions, routeSessionId, handleSessionClick);
+
+  const handleClosePanel = useCallback(() => {
+    setOptimisticActiveSessionId(null);
+    startNavigationTransition(() => {
+      router.push("/sessions");
+    });
+  }, [router, startNavigationTransition]);
 
   const shellContextValue = useMemo(
     () => ({
@@ -155,32 +146,46 @@ export function SessionsRouteShell({
 
   return (
     <SessionsShellProvider value={shellContextValue}>
-      <SidebarProvider
-        className="h-dvh overflow-hidden"
-        style={
-          {
-            "--sidebar-width": "20rem",
-          } as CSSProperties
-        }
-      >
-        <Sidebar collapsible="offcanvas" className="border-r border-border">
-          <SidebarContent className="bg-muted/20">
-            <InboxSidebar
-              sessions={sessions}
-              archivedCount={archivedCount}
-              sessionsLoading={sessionsLoading}
-              activeSessionId={activeSessionId}
-              pendingSessionId={pendingSessionId}
-              onSessionClick={handleSessionClick}
-              onSessionPrefetch={handleSessionPrefetch}
-              onRenameSession={handleRenameSession}
-              onArchiveSession={handleArchiveSession}
-              onOpenNewSession={openNewSessionDialog}
-              initialUser={currentUser}
-            />
-          </SidebarContent>
-        </Sidebar>
-        <RouteContentShell>{children}</RouteContentShell>
+      {/* SidebarProvider kept for context compatibility with useSidebar consumers in session detail */}
+      <SidebarProvider className="h-dvh overflow-hidden">
+        {/* Inbox — always visible as the main content */}
+        <div className="flex h-dvh w-full flex-col overflow-hidden">
+          <InboxSidebar
+            sessions={sessions}
+            archivedCount={archivedCount}
+            sessionsLoading={sessionsLoading}
+            activeSessionId={activeSessionId}
+            pendingSessionId={pendingSessionId}
+            onSessionClick={handleSessionClick}
+            onSessionPrefetch={handleSessionPrefetch}
+            onRenameSession={handleRenameSession}
+            onArchiveSession={handleArchiveSession}
+            onOpenNewSession={openNewSessionDialog}
+            initialUser={currentUser}
+          />
+        </div>
+
+        {/* Backdrop */}
+        <button
+          type="button"
+          className={cn(
+            "fixed inset-0 z-40 bg-black/20 transition-opacity duration-200",
+            panelOpen ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+          onClick={handleClosePanel}
+          tabIndex={-1}
+          aria-label="Close session panel"
+        />
+
+        {/* Session detail panel — slides from right */}
+        <div
+          className={cn(
+            "fixed inset-y-0 right-0 z-50 w-full border-l border-border bg-background shadow-xl transition-transform duration-200 ease-out sm:w-[min(72vw,64rem)]",
+            panelOpen ? "translate-x-0" : "translate-x-full",
+          )}
+        >
+          <div className="flex h-full flex-col overflow-hidden">{children}</div>
+        </div>
       </SidebarProvider>
 
       <NewSessionDialog

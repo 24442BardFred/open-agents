@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeft,
   EllipsisVertical,
   ExternalLink,
   GitPullRequest,
@@ -8,7 +9,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useSessionLayout } from "./session-layout-context";
 
 export default function Loading() {
@@ -23,7 +23,13 @@ export default function Loading() {
       <header className="border-b border-border px-3 py-2 lg:px-4 lg:py-3">
         <div className="relative flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 lg:gap-4">
-            <SidebarTrigger className="shrink-0" />
+            <Link
+              href="/sessions"
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Back to inbox"
+            >
+              <ArrowLeft className="size-4" />
+            </Link>
             <div className="flex min-w-0 items-center gap-2 text-sm">
               {session.repoName && (
                 <div className="hidden min-w-0 items-center gap-2 sm:flex">
