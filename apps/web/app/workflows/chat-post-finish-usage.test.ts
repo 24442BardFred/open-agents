@@ -53,6 +53,7 @@ mock.module("@/lib/db/sessions", () => ({
   isFirstChatMessage: mock(() => Promise.resolve(false)),
   upsertChatMessageScoped: mock(() => Promise.resolve({ status: "inserted" })),
   updateChatAssistantActivity: mock(() => Promise.resolve()),
+  updateChatUserActivity: mock(() => Promise.resolve()),
 }));
 
 mock.module("@/lib/sandbox/lifecycle", () => ({

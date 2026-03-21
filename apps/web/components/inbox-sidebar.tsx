@@ -9,7 +9,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { InboxSidebarRenameDialog } from "@/components/inbox-sidebar-rename-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -89,9 +89,15 @@ function isWaitingOnAgent(session: SessionWithUnread): boolean {
   return session.hasStreaming;
 }
 
+/**
+ * A session needs action when the agent has responded and the user hasn't
+ * replied yet (needsResponse), OR when a PR is open and ready for review.
+ * Streaming sessions are excluded — they're "waiting", not "action".
+ */
 function needsAction(session: SessionWithUnread): boolean {
   return (
-    !session.hasStreaming && (session.hasUnread || session.prStatus === "open")
+    !session.hasStreaming &&
+    (session.needsResponse || session.prStatus === "open")
   );
 }
 
@@ -118,30 +124,45 @@ function sortSessionsForInbox(
   });
 }
 
-function getMetaLine(session: SessionWithUnread): string {
-  const parts: string[] = [];
+/** Repo label shown before the title — the "sender" line in email terms. */
+function getRepoLabel(session: SessionWithUnread): string | null {
+  if (!session.repoName) return null;
+  return session.repoOwner
+    ? `${session.repoOwner}/${session.repoName}`
+    : session.repoName;
+}
 
-  if (session.repoOwner && session.repoName) {
-    parts.push(`${session.repoOwner}/${session.repoName}`);
-  } else if (session.repoName) {
-    parts.push(session.repoName);
+/** One-line derived snippet that describes the current state of the session. */
+function getSnippet(session: SessionWithUnread): string {
+  if (isWaitingOnAgent(session)) {
+    return "Agent is working…";
+  }
+
+  if (
+    session.needsResponse &&
+    session.prStatus === "open" &&
+    session.prNumber
+  ) {
+    return `PR #${session.prNumber} open — awaiting your review`;
+  }
+
+  if (session.needsResponse) {
+    return "Agent replied — awaiting your response";
+  }
+
+  if (session.prStatus === "open" && session.prNumber) {
+    return `PR #${session.prNumber} is open`;
+  }
+
+  if (session.prStatus === "merged" && session.prNumber) {
+    return `PR #${session.prNumber} merged`;
   }
 
   if (session.branch) {
-    parts.push(session.branch);
+    return session.branch;
   }
 
-  if (session.prNumber) {
-    const prefix = session.prStatus === "merged" ? "Merged" : "PR";
-    parts.push(`${prefix} #${session.prNumber}`);
-  }
-
-  if (parts.length === 0) {
-    if (isWaitingOnAgent(session)) return "Agent working...";
-    return "";
-  }
-
-  return parts.join(" · ");
+  return "";
 }
 
 function DiffStats({
@@ -169,6 +190,7 @@ type SessionRowProps = {
   session: SessionWithUnread;
   isActive: boolean;
   isPending: boolean;
+  isFocused: boolean;
   onSessionClick: (session: SessionWithUnread) => void;
   onSessionPrefetch: (session: SessionWithUnread) => void;
   onOpenRenameDialog: (session: SessionWithUnread) => void;
@@ -179,33 +201,42 @@ const SessionRow = memo(function SessionRow({
   session,
   isActive,
   isPending,
+  isFocused,
   onSessionClick,
   onSessionPrefetch,
   onOpenRenameDialog,
   onArchiveSession,
 }: SessionRowProps) {
-  const isUnread = needsAction(session) && !isActive;
+  const hasAction = needsAction(session);
   const isWorking = isWaitingOnAgent(session);
+  const isHighlighted = hasAction || isWorking;
   const lastActivityLabel = useMemo(
     () =>
       formatRelativeTime(new Date(session.lastActivityAt ?? session.createdAt)),
     [session.createdAt, session.lastActivityAt],
   );
-  const meta = getMetaLine(session);
+  const repoLabel = getRepoLabel(session);
+  const snippet = getSnippet(session);
 
   return (
     <div
       className={cn(
-        "group relative flex w-full items-start gap-2.5 border-b border-border/50 px-4 py-2.5 text-left transition-colors",
-        isActive ? "bg-accent/50" : "hover:bg-accent/30",
+        "group relative flex w-full items-start gap-2.5 border-b border-border/50 px-4 py-2 text-left transition-colors",
+        isActive
+          ? "bg-accent/50"
+          : isFocused
+            ? "bg-accent/30"
+            : "hover:bg-accent/30",
         isPending ? "opacity-70" : "opacity-100",
       )}
       style={sessionRowPerformanceStyle}
+      data-session-id={session.id}
     >
+      {/* Status dot */}
       <div className="flex h-5 w-3 shrink-0 items-center justify-center pt-px">
         {isWorking ? (
           <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-        ) : isUnread ? (
+        ) : hasAction ? (
           <span className="h-2 w-2 rounded-full bg-foreground" />
         ) : null}
       </div>
@@ -217,25 +248,17 @@ const SessionRow = memo(function SessionRow({
           onMouseEnter={() => onSessionPrefetch(session)}
           onFocus={() => onSessionPrefetch(session)}
           className="block w-full text-left"
+          tabIndex={-1}
           aria-busy={isPending}
         >
-          <div className="flex min-w-0 items-baseline gap-3 pr-6">
-            <p
-              className={cn(
-                "min-w-0 flex-1 truncate text-[13px] leading-5",
-                isUnread || isWorking
-                  ? "font-semibold text-foreground"
-                  : "font-normal text-foreground",
-              )}
-            >
-              {session.title}
-            </p>
-            <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              {meta ? (
-                <span className="hidden truncate font-mono sm:inline">
-                  {meta}
-                </span>
-              ) : null}
+          {/* Line 1: repo (sender) + timestamp */}
+          <div className="flex min-w-0 items-baseline gap-2 pr-6">
+            {repoLabel ? (
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                {repoLabel}
+              </span>
+            ) : null}
+            <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
               <DiffStats
                 added={session.linesAdded}
                 removed={session.linesRemoved}
@@ -244,6 +267,25 @@ const SessionRow = memo(function SessionRow({
               <span className="tabular-nums">{lastActivityLabel}</span>
             </span>
           </div>
+
+          {/* Line 2: title (subject) */}
+          <p
+            className={cn(
+              "truncate text-[13px] leading-5",
+              isHighlighted
+                ? "font-semibold text-foreground"
+                : "font-normal text-foreground",
+            )}
+          >
+            {session.title}
+          </p>
+
+          {/* Line 3: snippet (preview) */}
+          {snippet ? (
+            <p className="mt-px truncate text-[11px] leading-4 text-muted-foreground">
+              {snippet}
+            </p>
+          ) : null}
         </button>
       </div>
 
@@ -252,7 +294,8 @@ const SessionRow = memo(function SessionRow({
           <button
             type="button"
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-2 top-2.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
+            className="absolute right-2 top-2 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
+            tabIndex={-1}
             aria-label={`Open menu for ${session.title}`}
           >
             <EllipsisVertical className="h-3.5 w-3.5" />
@@ -285,7 +328,11 @@ function areSessionRowsEqual(
   prev: SessionRowProps,
   next: SessionRowProps,
 ): boolean {
-  if (prev.isActive !== next.isActive || prev.isPending !== next.isPending) {
+  if (
+    prev.isActive !== next.isActive ||
+    prev.isPending !== next.isPending ||
+    prev.isFocused !== next.isFocused
+  ) {
     return false;
   }
 
@@ -294,6 +341,7 @@ function areSessionRowsEqual(
     prev.session.title === next.session.title &&
     prev.session.hasStreaming === next.session.hasStreaming &&
     prev.session.hasUnread === next.session.hasUnread &&
+    prev.session.needsResponse === next.session.needsResponse &&
     prev.session.repoOwner === next.session.repoOwner &&
     prev.session.repoName === next.session.repoName &&
     prev.session.branch === next.session.branch &&
@@ -322,6 +370,8 @@ export function InboxSidebar({
   const { session } = useSession();
   const [showArchived, setShowArchived] = useState(false);
   const [activeFilter, setActiveFilter] = useState<InboxFilter>("action");
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
   const [archivedSessions, setArchivedSessions] = useState<SessionWithUnread[]>(
     [],
   );
@@ -363,9 +413,9 @@ export function InboxSidebar({
             return data.sessions;
           }
 
-          const existingIds = new Set(current.map((session) => session.id));
+          const existingIds = new Set(current.map((s) => s.id));
           const nextSessions = data.sessions.filter(
-            (session) => !existingIds.has(session.id),
+            (s) => !existingIds.has(s.id),
           );
 
           return [...current, ...nextSessions];
@@ -441,6 +491,11 @@ export function InboxSidebar({
     (showArchived && archivedSessionsLoading && archivedSessions.length === 0);
   const sidebarUser = session?.user ?? initialUser;
 
+  // Reset keyboard focus when displayed list changes
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [displayedSessions.length, showArchived, activeFilter]);
+
   const handleSessionClick = useCallback(
     (targetSession: SessionWithUnread) => {
       onSessionClick(targetSession);
@@ -462,7 +517,7 @@ export function InboxSidebar({
         setArchivedSessions((current) => {
           const nextSessions = [
             { ...targetSession, status: "archived" as const },
-            ...current.filter((session) => session.id !== targetSession.id),
+            ...current.filter((s) => s.id !== targetSession.id),
           ];
           const maxCachedSessions = Math.max(
             current.length,
@@ -515,13 +570,63 @@ export function InboxSidebar({
   const handleRenameArchivedSession = useCallback(
     (sessionId: string, title: string) => {
       setArchivedSessions((current) =>
-        current.map((session) =>
-          session.id === sessionId ? { ...session, title } : session,
-        ),
+        current.map((s) => (s.id === sessionId ? { ...s, title } : s)),
       );
     },
     [],
   );
+
+  // Keyboard navigation: up/down to move, enter to open, escape to reset
+  const handleListKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (displayedSessions.length === 0) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+        case "j": {
+          e.preventDefault();
+          setFocusedIndex((prev) =>
+            prev < displayedSessions.length - 1 ? prev + 1 : prev,
+          );
+          break;
+        }
+        case "ArrowUp":
+        case "k": {
+          e.preventDefault();
+          setFocusedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+          break;
+        }
+        case "Enter": {
+          e.preventDefault();
+          const focused = displayedSessions[focusedIndex];
+          if (focused) {
+            onSessionClick(focused);
+          }
+          break;
+        }
+        case "Escape": {
+          e.preventDefault();
+          setFocusedIndex(-1);
+          break;
+        }
+      }
+    },
+    [displayedSessions, focusedIndex, onSessionClick],
+  );
+
+  // Scroll focused row into view
+  useEffect(() => {
+    if (focusedIndex < 0 || !listRef.current) return;
+    const focusedSession = displayedSessions[focusedIndex];
+    if (!focusedSession) return;
+
+    const row = listRef.current.querySelector(
+      `[data-session-id="${focusedSession.id}"]`,
+    );
+    if (row) {
+      row.scrollIntoView({ block: "nearest" });
+    }
+  }, [focusedIndex, displayedSessions]);
 
   return (
     <>
@@ -651,13 +756,21 @@ export function InboxSidebar({
       </div>
 
       {/* Session list */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={listRef}
+        className="min-h-0 flex-1 overflow-y-auto focus:outline-none"
+        tabIndex={0}
+        onKeyDown={handleListKeyDown}
+        role="listbox"
+        aria-label="Sessions"
+      >
         {showLoadingSkeleton ? (
           <div className="space-y-px">
             {Array.from({ length: 8 }).map((_, index) => (
               <div key={index} className="space-y-1.5 px-4 py-2.5">
+                <div className="h-3 w-24 animate-pulse rounded bg-muted" />
                 <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
               </div>
             ))}
           </div>
@@ -686,12 +799,13 @@ export function InboxSidebar({
         ) : (
           <>
             <div>
-              {displayedSessions.map((targetSession) => (
+              {displayedSessions.map((targetSession, index) => (
                 <SessionRow
                   key={targetSession.id}
                   session={targetSession}
                   isActive={targetSession.id === activeSessionId}
                   isPending={targetSession.id === pendingSessionId}
+                  isFocused={index === focusedIndex}
                   onSessionClick={handleSessionClick}
                   onSessionPrefetch={handleSessionPrefetch}
                   onOpenRenameDialog={handleOpenRenameDialog}

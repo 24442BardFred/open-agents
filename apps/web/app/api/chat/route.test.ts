@@ -123,6 +123,7 @@ mock.module("@/lib/db/sessions", () => ({
   updateChat: async () => {},
   updateChatActiveStreamId: async () => {},
   updateChatAssistantActivity: async () => {},
+  updateChatUserActivity: async () => {},
   updateSession: async (_sessionId: string, patch: Record<string, unknown>) =>
     patch,
   upsertChatMessageScoped: async () => ({ status: "inserted" as const }),

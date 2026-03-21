@@ -51,6 +51,7 @@ mock.module("@/lib/db/sessions", () => ({
   touchChat: spies.touchChat,
   updateChat: spies.updateChat,
   updateChatAssistantActivity: spies.updateChatAssistantActivity,
+  updateChatUserActivity: mock(() => Promise.resolve()),
   updateSession: spies.updateSession,
   upsertChatMessageScoped: spies.upsertChatMessageScoped,
 }));
