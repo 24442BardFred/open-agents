@@ -25,7 +25,7 @@ describe("TerminalPanelView", () => {
     expect(html).toContain("Restart the sandbox to expose the terminal route.");
   });
 
-  test("renders the ready state with an embedded iframe", () => {
+  test("renders the ready state with an inline terminal container", () => {
     const html = renderToStaticMarkup(
       <TerminalPanelView
         state={{
@@ -35,9 +35,9 @@ describe("TerminalPanelView", () => {
       />,
     );
 
-    expect(html).toContain("https://terminal.vercel.run/#token=test-token");
-    expect(html).toContain("<iframe");
-    expect(html).not.toContain("Open in new tab");
+    expect(html).toContain("bg-[#09090b]");
+    expect(html).toContain("<div");
+    expect(html).not.toContain("<iframe");
   });
 
   test("renders the error state", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionTerminalLaunchResponse } from "@/app/api/sessions/[sessionId]/terminal/route";
 
 export const TERMINAL_HEARTBEAT_INTERVAL_MS = 60_000;
@@ -22,6 +22,183 @@ type TerminalPanelState =
       status: "error";
       message: string;
     };
+
+function InlineTerminal({ terminalUrl }: { terminalUrl: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let isDisposed = false;
+    let cleanupResizeObserver: (() => void) | undefined;
+    let cleanupWindowResize: (() => void) | undefined;
+    let cleanupTerminal: (() => void) | undefined;
+    let reconnectTimeoutId: number | null = null;
+    let socket: WebSocket | null = null;
+
+    async function startTerminal() {
+      const container = containerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const { FitAddon, Terminal, init } = await import("ghostty-web");
+
+      if (isDisposed) {
+        return;
+      }
+
+      await init();
+
+      if (isDisposed) {
+        return;
+      }
+
+      container.replaceChildren();
+
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily:
+          'Geist Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        scrollback: 10000,
+        theme: {
+          background: "#09090b",
+          foreground: "#fafafa",
+        },
+      });
+
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      await term.open(container);
+
+      if (isDisposed) {
+        term.dispose();
+        return;
+      }
+
+      const terminalUrlObject = new URL(terminalUrl);
+      const token = terminalUrlObject.hash.startsWith("#")
+        ? new URLSearchParams(terminalUrlObject.hash.slice(1)).get("token")
+        : null;
+
+      if (!token) {
+        term.write("\r\nMissing terminal token.\r\n");
+        term.dispose();
+        return;
+      }
+
+      const fitTerminal = () => {
+        fitAddon.fit();
+      };
+
+      fitTerminal();
+
+      if (typeof fitAddon.observeResize === "function") {
+        fitAddon.observeResize();
+      }
+
+      const buildWebSocketUrl = () => {
+        const protocol =
+          terminalUrlObject.protocol === "https:" ? "wss:" : "ws:";
+        const url = new URL(`${protocol}//${terminalUrlObject.host}/ws`);
+        url.searchParams.set("cols", String(term.cols));
+        url.searchParams.set("rows", String(term.rows));
+        url.searchParams.set("token", token);
+        return url.toString();
+      };
+
+      const clearReconnectTimeout = () => {
+        if (reconnectTimeoutId !== null) {
+          window.clearTimeout(reconnectTimeoutId);
+          reconnectTimeoutId = null;
+        }
+      };
+
+      const connect = () => {
+        if (isDisposed) {
+          return;
+        }
+
+        socket = new WebSocket(buildWebSocketUrl());
+
+        socket.addEventListener("message", (event) => {
+          term.write(event.data as string);
+        });
+
+        socket.addEventListener("close", () => {
+          if (isDisposed) {
+            return;
+          }
+          clearReconnectTimeout();
+          reconnectTimeoutId = window.setTimeout(() => {
+            reconnectTimeoutId = null;
+            connect();
+          }, 1500);
+        });
+      };
+
+      connect();
+
+      const onDataDisposable = term.onData((data) => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(data);
+        }
+      });
+
+      const onResizeDisposable = term.onResize(({ cols, rows }) => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      });
+
+      if (typeof ResizeObserver === "function") {
+        const resizeObserver = new ResizeObserver(() => {
+          fitTerminal();
+        });
+        resizeObserver.observe(container);
+        cleanupResizeObserver = () => {
+          resizeObserver.disconnect();
+        };
+      }
+
+      const handleWindowResize = () => {
+        fitTerminal();
+      };
+      window.addEventListener("resize", handleWindowResize);
+      cleanupWindowResize = () => {
+        window.removeEventListener("resize", handleWindowResize);
+      };
+
+      cleanupTerminal = () => {
+        onDataDisposable.dispose();
+        onResizeDisposable.dispose();
+        clearReconnectTimeout();
+        socket?.close();
+        socket = null;
+        term.dispose();
+      };
+    }
+
+    void startTerminal();
+
+    return () => {
+      isDisposed = true;
+      cleanupResizeObserver?.();
+      cleanupWindowResize?.();
+      cleanupTerminal?.();
+      if (reconnectTimeoutId !== null) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+      socket?.close();
+    };
+  }, [terminalUrl]);
+
+  return (
+    <div
+      className="h-full min-h-0 w-full flex-1 bg-[#09090b] p-3"
+      ref={containerRef}
+    />
+  );
+}
 
 export function TerminalPanelView({ state }: { state: TerminalPanelState }) {
   if (state.status === "loading") {
@@ -59,14 +236,7 @@ export function TerminalPanelView({ state }: { state: TerminalPanelState }) {
     );
   }
 
-  return (
-    <iframe
-      className="h-full min-h-0 w-full flex-1 border-0 bg-background"
-      sandbox="allow-popups allow-scripts"
-      src={state.terminalUrl}
-      title="Session terminal"
-    />
-  );
+  return <InlineTerminal terminalUrl={state.terminalUrl} />;
 }
 
 async function parseLaunchError(response: Response): Promise<string> {
