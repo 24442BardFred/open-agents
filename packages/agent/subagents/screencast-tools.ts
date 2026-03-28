@@ -115,13 +115,9 @@ export const synthesizeVoiceoverTool = () =>
       // Ensure output directory exists
       await sandbox.exec(`mkdir -p "${segmentDir}"`, workDir, EXEC_TIMEOUT_MS);
 
-      // Check for API key
-      const keyCheck = await sandbox.exec(
-        'test -n "$ELEVENLABS_API_KEY" && echo "yes" || echo "no"',
-        workDir,
-        EXEC_TIMEOUT_MS,
-      );
-      if (keyCheck.stdout.trim() !== "yes") {
+      // Check for API key in the host process environment
+      const apiKey = process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) {
         return {
           success: false,
           error:
@@ -133,7 +129,8 @@ export const synthesizeVoiceoverTool = () =>
       const { experimental_generateSpeech: generateSpeech } = await import(
         "ai"
       );
-      const { elevenlabs } = await import("@ai-sdk/elevenlabs");
+      const { createElevenLabs } = await import("@ai-sdk/elevenlabs");
+      const elevenlabs = createElevenLabs({ apiKey });
 
       const segments: string[] = [];
 
@@ -237,6 +234,16 @@ export const uploadBlobTool = () =>
       const mimeType =
         contentType ?? CONTENT_TYPES[ext] ?? "application/octet-stream";
 
+      // Check for blob token in the host process environment
+      const token = process.env.BLOB_READ_WRITE_TOKEN;
+      if (!token) {
+        return {
+          success: false,
+          error:
+            "BLOB_READ_WRITE_TOKEN not set. Cannot upload — the local file path is still usable.",
+        };
+      }
+
       // Dynamic import to avoid hard dependency at module load time
       let put: typeof import("@vercel/blob").put;
       try {
@@ -254,6 +261,7 @@ export const uploadBlobTool = () =>
         const blob = await put(blobFilename, buffer, {
           access: "public",
           contentType: mimeType,
+          token,
         });
 
         return {
