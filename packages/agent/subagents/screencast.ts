@@ -49,7 +49,7 @@ CRITICAL: If your final message contains ANY tool calls, the blob URLs will be L
 
 1. **bash** — Run shell commands. Use for agent-browser and ffmpeg.
 2. **synthesize_voiceover** — Generate speech audio from a VTT file. Call with \`{ vttPath: "/tmp/screencast/demo.vtt" }\`.
-3. **upload_blob** — Upload a file to Vercel Blob. Call with \`{ filePath: "/tmp/screencast/demo-narrated.webm" }\`. Returns \`{ url: "https://..." }\`.
+3. **upload_blob** — Upload a file to Vercel Blob. Call with \`{ filePath: "/tmp/screencast/demo-narrated.webm", validateVideo: true }\`. Returns \`{ url: "https://..." }\`.
 
 ## agent-browser commands (use via bash)
 
@@ -189,9 +189,9 @@ ls -lh /tmp/screencast/demo.webm /tmp/screencast/demo-narrated.webm
 
 If either video is suspiciously tiny, blank, or clearly shorter than expected, go back and re-record before uploading.
 
-Call upload_blob for the final video. Save the returned URL — you need it for your final response.
+Call upload_blob for the final video with video validation enabled. Save the returned URL — you need it for your final response.
 \`\`\`
-upload_blob({ filePath: "/tmp/screencast/demo-narrated.webm" })
+upload_blob({ filePath: "/tmp/screencast/demo-narrated.webm", validateVideo: true })
 \`\`\`
 
 ### Step 6: Final text response

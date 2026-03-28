@@ -1,8 +1,22 @@
 import { tool } from "ai";
+import { basename } from "node:path";
 import { z } from "zod";
 import { getSandbox } from "../tools/utils";
 
 const EXEC_TIMEOUT_MS = 120_000;
+const MIN_VIDEO_BYTES = 50_000;
+
+interface VideoProbeResult {
+  success: boolean;
+  filePath: string;
+  exists: boolean;
+  sizeBytes: number;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  hasVideoStream: boolean;
+  error?: string;
+}
 
 // ---------------------------------------------------------------------------
 // VTT parsing (shared)
@@ -75,6 +89,149 @@ function parseVTT(content: string): VTTCue[] {
   }
 
   return cues;
+}
+
+async function probeVideo(
+  sandbox: Awaited<ReturnType<typeof getSandbox>>,
+  filePath: string,
+): Promise<VideoProbeResult> {
+  const workDir = sandbox.workingDirectory;
+  const ffprobePath = (
+    await sandbox.exec("which ffprobe || true", workDir, EXEC_TIMEOUT_MS)
+  ).stdout.trim();
+
+  const statResult = await sandbox.exec(
+    `if [ -f '${filePath}' ]; then stat -c '%s' '${filePath}'; else echo missing; fi`,
+    workDir,
+    EXEC_TIMEOUT_MS,
+  );
+
+  if (!statResult.success) {
+    return {
+      success: false,
+      filePath,
+      exists: false,
+      sizeBytes: 0,
+      hasVideoStream: false,
+      error: `Failed to stat file: ${filePath}`,
+    };
+  }
+
+  const statOutput = statResult.stdout.trim();
+  if (statOutput === "missing") {
+    return {
+      success: false,
+      filePath,
+      exists: false,
+      sizeBytes: 0,
+      hasVideoStream: false,
+      error: `File does not exist: ${filePath}`,
+    };
+  }
+
+  const sizeBytes = Number.parseInt(statOutput, 10);
+  if (!Number.isFinite(sizeBytes)) {
+    return {
+      success: false,
+      filePath,
+      exists: true,
+      sizeBytes: 0,
+      hasVideoStream: false,
+      error: `Unable to determine file size for: ${filePath}`,
+    };
+  }
+
+  if (!ffprobePath) {
+    return {
+      success: sizeBytes >= MIN_VIDEO_BYTES,
+      filePath,
+      exists: true,
+      sizeBytes,
+      hasVideoStream: sizeBytes >= MIN_VIDEO_BYTES,
+      error:
+        sizeBytes >= MIN_VIDEO_BYTES
+          ? undefined
+          : "Video file is too small and ffprobe is unavailable for deeper validation.",
+    };
+  }
+
+  const probeResult = await sandbox.exec(
+    `${ffprobePath} -v error -print_format json -show_streams -show_format '${filePath}'`,
+    workDir,
+    EXEC_TIMEOUT_MS,
+  );
+
+  if (!probeResult.success || !probeResult.stdout.trim()) {
+    return {
+      success: false,
+      filePath,
+      exists: true,
+      sizeBytes,
+      hasVideoStream: false,
+      error: `ffprobe failed for: ${filePath}`,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(probeResult.stdout) as {
+      streams?: Array<{
+        codec_type?: string;
+        width?: number;
+        height?: number;
+        duration?: string;
+      }>;
+      format?: {
+        duration?: string;
+      };
+    };
+
+    const videoStream = parsed.streams?.find(
+      (stream) => stream.codec_type === "video",
+    );
+    const durationSeconds = Number.parseFloat(
+      videoStream?.duration ?? parsed.format?.duration ?? "0",
+    );
+    const width = videoStream?.width;
+    const height = videoStream?.height;
+    const hasVideoStream = Boolean(videoStream);
+    const durationLooksValid =
+      Number.isFinite(durationSeconds) && durationSeconds >= 1;
+    const dimensionsLookValid =
+      typeof width === "number" &&
+      width > 0 &&
+      typeof height === "number" &&
+      height > 0;
+    const success =
+      hasVideoStream &&
+      durationLooksValid &&
+      dimensionsLookValid &&
+      sizeBytes >= MIN_VIDEO_BYTES;
+
+    return {
+      success,
+      filePath,
+      exists: true,
+      sizeBytes,
+      durationSeconds: Number.isFinite(durationSeconds)
+        ? durationSeconds
+        : undefined,
+      width,
+      height,
+      hasVideoStream,
+      error: success
+        ? undefined
+        : `Invalid video output for ${filePath}: hasVideoStream=${hasVideoStream}, duration=${Number.isFinite(durationSeconds) ? durationSeconds : "unknown"}, sizeBytes=${sizeBytes}, width=${width ?? "unknown"}, height=${height ?? "unknown"}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      filePath,
+      exists: true,
+      sizeBytes,
+      hasVideoStream: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +353,12 @@ const uploadInputSchema = z.object({
     .string()
     .optional()
     .describe("MIME type (default: auto-detected from extension)"),
+  validateVideo: z
+    .boolean()
+    .optional()
+    .describe(
+      "When true, verify that uploaded video has a real video stream, duration, and non-trivial size before upload",
+    ),
 });
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -213,11 +376,24 @@ export const uploadBlobTool = () =>
       "Returns the public URL. Requires BLOB_READ_WRITE_TOKEN environment variable.",
     inputSchema: uploadInputSchema,
     execute: async (
-      { filePath, filename, contentType },
+      { filePath, filename, contentType, validateVideo },
       { experimental_context },
     ) => {
       const sandbox = await getSandbox(experimental_context, "upload");
       const workDir = sandbox.workingDirectory;
+
+      const shouldValidateVideo =
+        validateVideo ?? /\.(webm|mp4)$/i.test(filePath);
+      if (shouldValidateVideo) {
+        const probe = await probeVideo(sandbox, filePath);
+        if (!probe.success) {
+          return {
+            success: false,
+            error: probe.error ?? `Video validation failed for: ${filePath}`,
+            validation: probe,
+          };
+        }
+      }
 
       // Read file from sandbox as base64
       const result = await sandbox.exec(
@@ -230,8 +406,8 @@ export const uploadBlobTool = () =>
       }
 
       const buffer = Buffer.from(result.stdout.trim(), "base64");
-      const basename = filePath.split("/").pop() ?? "file";
-      const blobFilename = filename ?? basename;
+      const sourceBasename = basename(filePath) || "file";
+      const blobFilename = filename ?? sourceBasename;
       const ext = "." + blobFilename.split(".").pop();
       const mimeType =
         contentType ?? CONTENT_TYPES[ext] ?? "application/octet-stream";
