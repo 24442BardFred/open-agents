@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { Providers } from "./providers";
+import { cn } from "@/lib/utils";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -61,16 +62,16 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} font-sans overflow-x-hidden antialiased`}
-        {...(isPreviewDeployment
-          ? { style: { "--preview-banner-h": "32px" } as React.CSSProperties }
-          : {})}
+        className={cn(
+          `${geistSans.variable} ${geistMono.variable} font-sans overflow-x-hidden antialiased`,
+          isPreviewDeployment && "preview-deployment",
+        )}
       >
         <script
           dangerouslySetInnerHTML={{ __html: themeInitializationScript }}
         />
         {isPreviewDeployment && (
-          <div className="pointer-events-none fixed inset-x-0 top-0 z-50 flex h-[--preview-banner-h] items-center justify-center gap-2 bg-orange-400/4 backdrop-blur-sm px-4 text-center text-xs font-medium text-orange-500 dark:text-orange-400">
+          <div className="preview-banner pointer-events-none fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-2 bg-orange-400/4 backdrop-blur-sm px-4 py-1.5 text-center text-xs font-medium text-orange-500 dark:text-orange-400">
             <span>⚠️</span>
             <span>Preview Deployment — this is not production</span>
             <span>⚠️</span>

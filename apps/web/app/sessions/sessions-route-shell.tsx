@@ -201,7 +201,7 @@ export function SessionsRouteShell({
   return (
     <SessionsShellProvider value={shellContextValue}>
       <SidebarProvider
-        className="h-[calc(100dvh-var(--preview-banner-h,0px))] overflow-hidden mt-[var(--preview-banner-h,0px)]"
+        className="h-dvh overflow-hidden"
         style={
           {
             "--sidebar-width": "20rem",
