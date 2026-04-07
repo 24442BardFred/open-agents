@@ -5,7 +5,7 @@ import {
   parseGitHubUrl,
 } from "@/lib/github/client";
 import { getRepoToken } from "@/lib/github/get-repo-token";
-import { getUserGitHubToken } from "@/lib/github/user-token";
+import { getUserGitHubTokenWithStatus } from "@/lib/github/user-token";
 import { getServerSession } from "@/lib/session/get-server-session";
 
 interface CreatePRRequest {
@@ -146,37 +146,28 @@ export async function POST(req: Request) {
     );
   }
 
-  const userToken = await getUserGitHubToken();
-  const tokenCandidates: string[] = [];
+  const userTokenResult = await getUserGitHubTokenWithStatus();
+  const userToken = userTokenResult.token;
 
   let headRef = resolvedBranch;
   const normalizedBaseOwner = parsedRepoUrl.owner.toLowerCase();
   const normalizedHeadOwner = headOwner?.trim().toLowerCase();
+  const isCrossFork =
+    normalizedHeadOwner && normalizedHeadOwner !== normalizedBaseOwner;
 
-  if (normalizedHeadOwner && normalizedHeadOwner !== normalizedBaseOwner) {
-    // Cross-fork PRs: prefer user token first since installation tokens are
-    // scoped to specific repos and may not cover the fork owner.
+  if (isCrossFork) {
     headRef = `${headOwner}:${resolvedBranch}`;
-    if (userToken) {
-      tokenCandidates.push(userToken);
-    }
   }
 
-  // Always try the installation token (or user token if no installation) first
-  // for same-owner PRs, so the PR is created from the GitHub App installation.
-  tokenCandidates.push(tokenResult.token);
-
-  // Fall back to user token if the primary token fails (e.g. repo-scoped
-  // installation tokens that don't cover this particular repo).
-  if (tokenResult.type === "installation" && userToken) {
-    tokenCandidates.push(userToken);
-  }
-
+  // Prefer user-to-server token for PR creation so the user appears as the
+  // PR author with the "with Open Harness" badge. Fall back to the
+  // installation token when no user-to-server token is available.
   const dedupedTokenCandidates: string[] = [];
-  for (const token of tokenCandidates) {
-    if (!dedupedTokenCandidates.includes(token)) {
-      dedupedTokenCandidates.push(token);
-    }
+  if (userToken && !dedupedTokenCandidates.includes(userToken)) {
+    dedupedTokenCandidates.push(userToken);
+  }
+  if (!dedupedTokenCandidates.includes(tokenResult.token)) {
+    dedupedTokenCandidates.push(tokenResult.token);
   }
 
   // 4. Create PR using existing function
@@ -298,11 +289,20 @@ export async function POST(req: Request) {
   }
 
   // 6. Return success
+  const createdAsBot = tokenUsedForCreation !== userToken;
   return Response.json({
     success: true,
     prUrl: result.prUrl,
     prNumber: result.prNumber,
     prStatus: "open",
     ...(enableAutoMerge ? { autoMergeEnabled, autoMergeError } : {}),
+    ...(createdAsBot
+      ? {
+          createdAsBot: true,
+          ...(userTokenResult.status !== "valid"
+            ? { userTokenStatus: userTokenResult.status }
+            : {}),
+        }
+      : {}),
   });
 }

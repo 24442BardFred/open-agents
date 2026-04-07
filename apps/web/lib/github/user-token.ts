@@ -70,25 +70,34 @@ async function refreshGitHubToken(
   }
 }
 
+export type UserTokenStatus =
+  | "valid"
+  | "no_account"
+  | "refresh_failed"
+  | "no_refresh_token";
+
+export type UserTokenResult =
+  | { token: string; status: "valid" }
+  | { token: null; status: "no_account" | "refresh_failed" | "no_refresh_token" };
+
 /**
- * Get a valid GitHub access token for the given user.
- * If no userId is provided, falls back to the current request session.
- * If the token is expired and a refresh token exists, refreshes inline
- * and updates the database (mirroring the Vercel token refresh flow).
+ * Get a valid GitHub user-to-server access token with status information.
+ * Returns a discriminated union so callers can distinguish between
+ * "no account linked" and "token expired and refresh failed".
  */
-export async function getUserGitHubToken(
+export async function getUserGitHubTokenWithStatus(
   userId?: string,
-): Promise<string | null> {
+): Promise<UserTokenResult> {
   const resolvedUserId = userId ?? (await getServerSession())?.user?.id;
-  if (!resolvedUserId) return null;
+  if (!resolvedUserId) return { token: null, status: "no_account" };
 
   try {
     const ghAccount = await getGitHubAccount(resolvedUserId);
-    if (!ghAccount?.accessToken) return null;
+    if (!ghAccount?.accessToken) return { token: null, status: "no_account" };
 
     // If no expiration is set, the token is non-expiring (classic OAuth)
     if (!ghAccount.expiresAt) {
-      return decrypt(ghAccount.accessToken);
+      return { token: decrypt(ghAccount.accessToken), status: "valid" };
     }
 
     // Check if the token is still valid (with 5-minute buffer)
@@ -97,18 +106,18 @@ export async function getUserGitHubToken(
     const isExpired = ghAccount.expiresAt.getTime() - bufferMs < now;
 
     if (!isExpired) {
-      return decrypt(ghAccount.accessToken);
+      return { token: decrypt(ghAccount.accessToken), status: "valid" };
     }
 
     // Token is expired -- try to refresh
     if (!ghAccount.refreshToken) {
       console.error("GitHub token expired but no refresh token available");
-      return null;
+      return { token: null, status: "no_refresh_token" };
     }
 
     const decryptedRefresh = decrypt(ghAccount.refreshToken);
     const refreshed = await refreshGitHubToken(decryptedRefresh);
-    if (!refreshed) return null;
+    if (!refreshed) return { token: null, status: "refresh_failed" };
 
     // Persist the new tokens. If persistence fails, still return the token
     // so the current request succeeds. The refresh token has already been
@@ -128,9 +137,22 @@ export async function getUserGitHubToken(
       );
     }
 
-    return refreshed.access_token;
+    return { token: refreshed.access_token, status: "valid" };
   } catch (error) {
     console.error("Error fetching GitHub token:", error);
-    return null;
+    return { token: null, status: "refresh_failed" };
   }
+}
+
+/**
+ * Get a valid GitHub access token for the given user.
+ * If no userId is provided, falls back to the current request session.
+ * If the token is expired and a refresh token exists, refreshes inline
+ * and updates the database (mirroring the Vercel token refresh flow).
+ */
+export async function getUserGitHubToken(
+  userId?: string,
+): Promise<string | null> {
+  const result = await getUserGitHubTokenWithStatus(userId);
+  return result.token;
 }

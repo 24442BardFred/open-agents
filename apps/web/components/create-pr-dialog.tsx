@@ -106,6 +106,8 @@ export function CreatePRDialog({
     requiresManualCreation?: boolean;
     autoMergeEnabled?: boolean;
     autoMergeError?: string;
+    createdAsBot?: boolean;
+    userTokenStatus?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [gitActions, setGitActions] = useState<GitActions | null>(null);
@@ -353,6 +355,11 @@ export function CreatePRDialog({
           typeof data.autoMergeError === "string"
             ? data.autoMergeError
             : undefined,
+        createdAsBot: Boolean(data.createdAsBot),
+        userTokenStatus:
+          typeof data.userTokenStatus === "string"
+            ? data.userTokenStatus
+            : undefined,
       });
 
       if (typeof data.prNumber === "number") {
@@ -424,6 +431,21 @@ export function CreatePRDialog({
               {result.autoMergeError && (
                 <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-700 dark:text-amber-400">
                   {result.autoMergeError}
+                </p>
+              )}
+              {result.createdAsBot && (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-700 dark:text-amber-400">
+                  This PR was created as the Open Harness bot.{" "}
+                  {/* oxlint-disable-next-line nextjs/no-html-link-for-pages */}
+                  <a
+                    href="/api/github/app/install"
+                    className="underline hover:no-underline"
+                  >
+                    {result.userTokenStatus === "no_account"
+                      ? "Connect your GitHub account"
+                      : "Reconnect your GitHub account"}
+                  </a>{" "}
+                  to create PRs as yourself.
                 </p>
               )}
             </div>

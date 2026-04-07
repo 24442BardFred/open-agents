@@ -12,7 +12,10 @@ import {
   isValidGitHubRepoName,
   isValidGitHubRepoOwner,
 } from "@/lib/github/repo-identifiers";
-import { getUserGitHubToken } from "@/lib/github/user-token";
+import {
+  getUserGitHubToken,
+  getUserGitHubTokenWithStatus,
+} from "@/lib/github/user-token";
 import { generatePullRequestContentFromSandbox } from "@/lib/git/pr-content";
 
 const SAFE_BRANCH_PATTERN = /^[\w\-/.]+$/;
@@ -34,6 +37,11 @@ export interface AutoCreatePrResult {
   prNumber?: number;
   prUrl?: string;
   error?: string;
+  /** When true, the PR was created using an installation token (bot author)
+   * because no valid user-to-server token was available. */
+  createdAsBot?: boolean;
+  /** Present when user-to-server token is unavailable and re-auth is needed. */
+  userTokenStatus?: "no_account" | "refresh_failed" | "no_refresh_token";
 }
 
 function dedupeTokenCandidates(
@@ -178,13 +186,21 @@ export async function performAutoCreatePr(
     };
   }
 
-  const userToken =
-    repoTokenResult.type === "installation"
-      ? await getUserGitHubToken(userId)
-      : null;
+  // Fetch the user-to-server token (preferred for PR creation so the user
+  // appears as the PR author with the "with Open Harness" badge).
+  const userTokenResult = await getUserGitHubTokenWithStatus(userId);
+  const userToken = userTokenResult.token;
+
+  // For read operations and git push, use any available token
   const tokenCandidates = dedupeTokenCandidates([
     repoTokenResult.token,
     userToken,
+  ]);
+
+  // For PR creation specifically, prefer the user-to-server token
+  const prTokenCandidates = dedupeTokenCandidates([
+    userToken,
+    repoTokenResult.token,
   ]);
 
   const authUrl = buildGitHubAuthRemoteUrl({
@@ -344,8 +360,9 @@ export async function performAutoCreatePr(
 
   const repoUrl = `https://github.com/${repoOwner}/${repoName}`;
   let createResult: Awaited<ReturnType<typeof createPullRequest>> | undefined;
+  let createdWithUserToken = false;
 
-  for (const token of tokenCandidates) {
+  for (const token of prTokenCandidates) {
     createResult = await createPullRequest({
       repoUrl,
       branchName,
@@ -356,6 +373,7 @@ export async function performAutoCreatePr(
     });
 
     if (createResult.success) {
+      createdWithUserToken = token === userToken;
       break;
     }
   }
@@ -414,11 +432,17 @@ export async function performAutoCreatePr(
     `[auto-pr] Created PR #${createResult.prNumber ?? "unknown"} for session ${sessionId}`,
   );
 
+  const createdAsBot = !createdWithUserToken;
+
   return {
     created: true,
     syncedExisting: false,
     skipped: false,
     prNumber: createResult.prNumber,
     prUrl: createResult.prUrl,
+    createdAsBot,
+    ...(createdAsBot && userTokenResult.status !== "valid"
+      ? { userTokenStatus: userTokenResult.status }
+      : {}),
   };
 }

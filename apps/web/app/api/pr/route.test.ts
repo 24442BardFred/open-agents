@@ -85,6 +85,10 @@ function registerRouteMocks() {
 
   mock.module("@/lib/github/user-token", () => ({
     getUserGitHubToken: async () => userToken,
+    getUserGitHubTokenWithStatus: async () =>
+      userToken
+        ? { token: userToken, status: "valid" as const }
+        : { token: null, status: "no_account" as const },
   }));
 
   mock.module("@/lib/github/client", () => ({
@@ -171,13 +175,15 @@ describe("/api/pr", () => {
     expect(body.autoMergeError).toBeUndefined();
     expect(createCalls).toHaveLength(1);
     expect(autoMergeCalls).toHaveLength(1);
+    // User-to-server token is preferred for PR creation so the user
+    // appears as PR author with the "with Open Harness" badge.
     expect(createCalls[0]).toMatchObject({
-      token: "installation-token",
+      token: "user-token",
       isDraft: false,
     });
     expect(autoMergeCalls[0]).toMatchObject({
       prNumber: 77,
-      token: "installation-token",
+      token: "user-token",
     });
     expect(updateCalls).toEqual([
       {

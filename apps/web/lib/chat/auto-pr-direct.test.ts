@@ -17,6 +17,10 @@ let repoTokenResult:
   installationId: 1,
 };
 let userTokenResult: string | null = null;
+let userTokenStatusResult: {
+  token: string | null;
+  status: "valid" | "no_account" | "refresh_failed" | "no_refresh_token";
+} = { token: null, status: "no_account" };
 let cachedBranchesResult: { branches: string[]; defaultBranch: string } | null =
   {
     branches: ["main", "feature-branch"],
@@ -77,6 +81,9 @@ const generatePullRequestContentFromSandboxSpy = mock(
   async () => prContentResult,
 );
 const getUserGitHubTokenSpy = mock(async (_userId?: string) => userTokenResult);
+const getUserGitHubTokenWithStatusSpy = mock(
+  async (_userId?: string) => userTokenStatusResult,
+);
 
 const sandbox = {
   workingDirectory: "/vercel/sandbox",
@@ -101,6 +108,7 @@ mock.module("@/lib/github/get-repo-token", () => ({
 
 mock.module("@/lib/github/user-token", () => ({
   getUserGitHubToken: getUserGitHubTokenSpy,
+  getUserGitHubTokenWithStatus: getUserGitHubTokenWithStatusSpy,
 }));
 
 mock.module("@/lib/github/client", () => ({
@@ -157,6 +165,7 @@ beforeEach(() => {
   createPullRequestSpy.mockClear();
   generatePullRequestContentFromSandboxSpy.mockClear();
   getUserGitHubTokenSpy.mockClear();
+  getUserGitHubTokenWithStatusSpy.mockClear();
 
   execResults = defaultExecResults();
   repoTokenResult = {
@@ -165,6 +174,7 @@ beforeEach(() => {
     installationId: 1,
   };
   userTokenResult = null;
+  userTokenStatusResult = { token: null, status: "no_account" };
   cachedBranchesResult = {
     branches: ["main", "feature-branch"],
     defaultBranch: "main",
@@ -308,8 +318,10 @@ describe("performAutoCreatePr", () => {
       skipped: false,
       prNumber: 42,
       prUrl: "https://github.com/acme/repo/pull/42",
+      createdAsBot: true,
+      userTokenStatus: "no_account",
     } satisfies AutoCreatePrResult);
-    expect(getUserGitHubTokenSpy).toHaveBeenCalledWith("user-1");
+    expect(getUserGitHubTokenWithStatusSpy).toHaveBeenCalledWith("user-1");
     expect(generatePullRequestContentFromSandboxSpy).toHaveBeenCalledTimes(1);
     expect(createPullRequestSpy).toHaveBeenCalledWith(
       expect.objectContaining({
