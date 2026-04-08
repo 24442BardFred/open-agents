@@ -1153,8 +1153,8 @@ export function GitPanel(props: GitPanelProps) {
     diffSummary &&
     (diffSummary.totalAdditions > 0 || diffSummary.totalDeletions > 0);
 
-  // Show the Git tab only when there's at least one commit (branch has diverged) or a PR exists
-  const showGitTab = hasDiff || hasExistingPr;
+  // Show the PR tab when there's a PR, or when the branch has diverged and changes are committed
+  const showGitTab = hasExistingPr || (hasDiff && !hasUncommittedGitChanges);
 
   return (
     <div className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-background xl:w-80">

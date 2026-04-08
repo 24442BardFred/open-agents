@@ -86,18 +86,19 @@ export function ChatTabs({ activeChatId }: ChatTabsProps) {
     const idToDelete = deletingChatId;
     setDeletingChatId(null);
 
-    // If deleting the active chat, navigate away first
+    // Delete first, then navigate if needed
+    try {
+      await deleteChat(idToDelete);
+    } catch (err) {
+      console.error("Failed to delete chat:", err);
+    }
+
+    // If we deleted the active chat, switch to another one
     if (idToDelete === activeChatId) {
       const remaining = chats.filter((c) => c.id !== idToDelete);
       if (remaining.length > 0) {
         switchChat(remaining[0].id);
       }
-    }
-
-    try {
-      await deleteChat(idToDelete);
-    } catch (err) {
-      console.error("Failed to delete chat:", err);
     }
   }, [deletingChatId, activeChatId, chats, deleteChat, switchChat]);
 
@@ -194,7 +195,21 @@ export function ChatTabs({ activeChatId }: ChatTabsProps) {
             );
           })}
 
-          {/* Changes tab — persists until explicitly closed */}
+          {/* New chat button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="ml-1 flex shrink-0 items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New chat</TooltipContent>
+          </Tooltip>
+
+          {/* Changes tab — appended at the end of the tab stack */}
           {!changesTabDismissed && focusedDiffFile && (
             <div
               className={cn(
@@ -212,7 +227,6 @@ export function ChatTabs({ activeChatId }: ChatTabsProps) {
                 <GitCompare className="h-3.5 w-3.5" />
                 <span>Changes</span>
               </button>
-              {/* Close button */}
               <button
                 type="button"
                 onClick={handleCloseChanges}
@@ -222,20 +236,6 @@ export function ChatTabs({ activeChatId }: ChatTabsProps) {
               </button>
             </div>
           )}
-
-          {/* New chat button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleNewChat}
-                className="ml-1 flex shrink-0 items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">New chat</TooltipContent>
-          </Tooltip>
         </div>
       </div>
 
