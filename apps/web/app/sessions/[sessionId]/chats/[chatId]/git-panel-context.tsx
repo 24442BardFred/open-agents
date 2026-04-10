@@ -11,8 +11,8 @@ import {
   type RefObject,
 } from "react";
 
-export type GitPanelTab = "diff" | "pr";
-export type ActiveView = "chat" | "diff";
+export type GitPanelTab = "diff" | "pr" | "files";
+export type ActiveView = "chat" | "diff" | "file";
 export type DiffScope = "uncommitted" | "branch";
 
 type GitPanelContextValue = {
@@ -56,6 +56,17 @@ type GitPanelContextValue = {
   hasCommittedChanges: boolean;
   setHasCommittedChanges: (has: boolean) => void;
 
+  /** File path currently open in the file tab view */
+  focusedFilePath: string | null;
+  setFocusedFilePath: (file: string | null) => void;
+
+  /** Whether the user has explicitly closed the File tab */
+  fileTabDismissed: boolean;
+  setFileTabDismissed: (dismissed: boolean) => void;
+
+  /** Open a file in the main content area (non-diff view) */
+  openFileTab: (filePath: string) => void;
+
   /** Share dialog trigger (set by per-chat page, called by header) */
   shareRequested: boolean;
   setShareRequested: (requested: boolean) => void;
@@ -73,7 +84,7 @@ const GitPanelContext = createContext<GitPanelContextValue | undefined>(
 
 export function GitPanelProvider({ children }: { children: ReactNode }) {
   const [gitPanelOpen, setGitPanelOpen] = useState(false);
-  const [gitPanelTab, setGitPanelTab] = useState<GitPanelTab>("diff");
+  const [gitPanelTab, setGitPanelTab] = useState<GitPanelTab>("files");
   const [activeView, setActiveView] = useState<ActiveView>("chat");
   const [focusedDiffFile, setFocusedDiffFile] = useState<string | null>(null);
   const [focusedDiffRequestId, setFocusedDiffRequestId] = useState(0);
@@ -82,6 +93,8 @@ export function GitPanelProvider({ children }: { children: ReactNode }) {
   const [hasActionNeeded, setHasActionNeeded] = useState(false);
   const [changesCount, setChangesCount] = useState(0);
   const [hasCommittedChanges, setHasCommittedChanges] = useState(false);
+  const [focusedFilePath, setFocusedFilePath] = useState<string | null>(null);
+  const [fileTabDismissed, setFileTabDismissed] = useState(false);
   const [shareRequested, setShareRequested] = useState(false);
   const panelPortalRef = useRef<HTMLDivElement | null>(null);
   const headerActionsRef = useRef<HTMLDivElement | null>(null);
@@ -91,6 +104,12 @@ export function GitPanelProvider({ children }: { children: ReactNode }) {
     setFocusedDiffRequestId((prev) => prev + 1);
     setActiveView("diff");
     setChangesTabDismissed(false);
+  }, []);
+
+  const openFileTab = useCallback((filePath: string) => {
+    setFocusedFilePath(filePath);
+    setActiveView("file");
+    setFileTabDismissed(false);
   }, []);
 
   const value = useMemo(
@@ -115,6 +134,11 @@ export function GitPanelProvider({ children }: { children: ReactNode }) {
       setChangesCount,
       hasCommittedChanges,
       setHasCommittedChanges,
+      focusedFilePath,
+      setFocusedFilePath,
+      fileTabDismissed,
+      setFileTabDismissed,
+      openFileTab,
       shareRequested,
       setShareRequested,
       panelPortalRef,
@@ -128,6 +152,9 @@ export function GitPanelProvider({ children }: { children: ReactNode }) {
       focusedDiffFile,
       focusedDiffRequestId,
       openDiffToFile,
+      focusedFilePath,
+      fileTabDismissed,
+      openFileTab,
       diffScope,
       hasActionNeeded,
       changesCount,

@@ -58,7 +58,9 @@ import {
   generatePullRequestContent,
 } from "@/lib/git-flow-client";
 import type { SessionGitStatus } from "@/hooks/use-session-git-status";
+import { useSessionFiles } from "@/hooks/use-session-files";
 import { useGitPanel } from "./git-panel-context";
+import { FileTree } from "./file-tree";
 
 /* ------------------------------------------------------------------ */
 /* Merge method labels / descriptions                                  */
@@ -1619,8 +1621,14 @@ function InlineMergePanel({
 /* ------------------------------------------------------------------ */
 
 export function GitPanel(props: GitPanelProps) {
-  const { gitPanelOpen, gitPanelTab, setGitPanelTab, diffScope, setDiffScope } =
-    useGitPanel();
+  const {
+    gitPanelOpen,
+    gitPanelTab,
+    setGitPanelTab,
+    diffScope,
+    setDiffScope,
+    openFileTab,
+  } = useGitPanel();
 
   const {
     session,
@@ -1674,6 +1682,11 @@ export function GitPanel(props: GitPanelProps) {
     };
   }, [session.repoOwner, session.repoName]);
 
+  const { files: sessionFiles, isLoading: filesLoading } = useSessionFiles(
+    session.id,
+    hasSandbox,
+  );
+
   const hasDiffChanges =
     diffSummary &&
     (diffSummary.totalAdditions > 0 || diffSummary.totalDeletions > 0);
@@ -1717,6 +1730,12 @@ export function GitPanel(props: GitPanelProps) {
       setGitPanelTab("diff");
     }
   }, [gitPanelTab, prTabDisabledReason, setGitPanelTab]);
+
+  const gitPanelTabs = [
+    "files" as const,
+    "diff" as const,
+    ...(canOpenPrTab ? (["pr"] as const) : []),
+  ];
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -1791,25 +1810,27 @@ export function GitPanel(props: GitPanelProps) {
 
       {/* Tab bar — matches chat tabs sub-header height */}
       <div className="flex items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-[7px]">
-        <button
-          type="button"
-          onClick={() => setGitPanelTab("diff")}
-          className={cn(
-            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            gitPanelTab === "diff"
-              ? "bg-secondary text-secondary-foreground"
-              : "text-muted-foreground hover:bg-muted/50",
-          )}
-        >
-          Changes
-          {hasDiffChanges && (
-            <span className="ml-1 text-[10px] text-muted-foreground font-mono">
-              {diffFiles?.length ?? 0}
-            </span>
-          )}
-        </button>
-
-        {prTabDisabledReason ? (
+        {gitPanelTabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setGitPanelTab(tab)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              gitPanelTab === tab
+                ? "bg-secondary text-secondary-foreground"
+                : "text-muted-foreground hover:bg-muted/50",
+            )}
+          >
+            {tab === "files" ? "Files" : tab === "diff" ? "Changes" : "PR"}
+            {tab === "diff" && hasDiffChanges && (
+              <span className="ml-1 text-[10px] text-muted-foreground font-mono">
+                {diffFiles?.length ?? 0}
+              </span>
+            )}
+          </button>
+        ))}
+        {!canOpenPrTab && prTabDisabledReason && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1822,19 +1843,6 @@ export function GitPanel(props: GitPanelProps) {
             </TooltipTrigger>
             <TooltipContent side="bottom">{prTabDisabledReason}</TooltipContent>
           </Tooltip>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setGitPanelTab("pr")}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-              gitPanelTab === "pr"
-                ? "bg-secondary text-secondary-foreground"
-                : "text-muted-foreground hover:bg-muted/50",
-            )}
-          >
-            PR
-          </button>
         )}
       </div>
 
@@ -1842,9 +1850,32 @@ export function GitPanel(props: GitPanelProps) {
       <div
         className={cn(
           "min-h-0 flex-1",
-          gitPanelTab === "diff" ? "flex flex-col" : "overflow-y-auto",
+          gitPanelTab === "diff" || gitPanelTab === "files"
+            ? "flex flex-col"
+            : "overflow-y-auto",
         )}
       >
+        {gitPanelTab === "files" && (
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+            {filesLoading ? (
+              <div className="flex w-full flex-col items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/25 py-8 text-center">
+                <p className="text-xs text-muted-foreground">Loading files…</p>
+              </div>
+            ) : sessionFiles && sessionFiles.length > 0 ? (
+              <FileTree
+                files={sessionFiles}
+                onFileClick={(filePath) => openFileTab(filePath)}
+              />
+            ) : (
+              <div className="flex w-full flex-col items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/25 py-8 text-center">
+                <p className="text-xs text-muted-foreground">
+                  {!hasSandbox ? "Waiting for sandbox…" : "No files found"}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {gitPanelTab === "diff" && (
           <div className="flex min-h-0 flex-1 flex-col">
             {/* Fixed commit area */}
