@@ -1,3 +1,4 @@
+import { formatElapsed } from "@/app/shared/[shareId]/shared-chat-status-utils";
 import type { UsageInsights } from "@/lib/usage/types";
 
 interface UsageInsightsSectionProps {
@@ -24,6 +25,10 @@ function formatLookbackLabel(lookbackDays: number): string {
   if (lookbackDays < 14) return `${lookbackDays} days`;
   const lookbackWeeks = Math.round(lookbackDays / 7);
   return `${lookbackWeeks} weeks`;
+}
+
+function formatOptionalElapsed(value: number | null): string {
+  return value === null ? "—" : formatElapsed(value);
 }
 
 export function UsageInsightsSection({ insights }: UsageInsightsSectionProps) {
@@ -55,6 +60,13 @@ export function UsageInsightsSection({ insights }: UsageInsightsSectionProps) {
           label="Largest turn"
           value={`${formatTokens(insights.efficiency.largestMainTurnTokens)}`}
           detail="Tokens · main agent"
+        />
+        <MetricCard
+          label="Longest turn"
+          value={formatOptionalElapsed(
+            insights.efficiency.longestAssistantTurnMs,
+          )}
+          detail="Assistant response time"
         />
         <MetricCard
           label="Avg tokens / turn"
