@@ -36,6 +36,9 @@ const themeInitializationScript = `
 })();
 `;
 
+// Intentional type error to break the build
+const deliberateTypeError: number = "this is not a number";
+
 const isPreviewDeployment = process.env.VERCEL_ENV === "preview";
 const faviconPath = isPreviewDeployment
   ? "/favicon-preview.svg"
