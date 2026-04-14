@@ -31,6 +31,33 @@ interface TeamsResponse {
 
 type StepId = 1 | 2 | 3;
 
+// ─── Logo (matches OG image) ────────────────────────────────────────────────
+
+function OpenAgentsLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-label="Open Agents"
+    >
+      <path
+        d="M4 17L10 11L4 5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 19H20"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function OnboardingFlow() {
@@ -97,30 +124,27 @@ export function OnboardingFlow() {
       {/* ── Left panel: branding ── */}
       <div className="flex shrink-0 flex-col justify-between bg-black px-6 py-6 md:w-1/2 md:px-12 md:py-10">
         {/* Logo */}
-        <div className="flex items-center gap-2.5">
-          <span className="inline-block size-2 rounded-full bg-white" />
-          <span className="text-sm font-medium tracking-tight text-white">
+        <div className="flex items-center gap-3">
+          <OpenAgentsLogo className="size-7 text-white/50" />
+          <span className="text-lg font-semibold tracking-tight text-white/50">
             Open Agents
           </span>
         </div>
 
-        {/* Tagline — hidden on mobile */}
-        <div className="hidden md:block">
-          <p className="max-w-xs text-sm leading-relaxed text-zinc-500">
-            Infrastructure for autonomous agents.
-            <br />
-            Set up in under a minute.
-          </p>
-        </div>
+        {/* Tagline — hidden on mobile, bottom-left */}
+        <p className="hidden max-w-sm text-sm leading-relaxed text-zinc-600 md:block">
+          Spawn coding agents that run infinitely in the cloud. Powered by AI
+          SDK, Gateway, Sandbox, and Workflow SDK.
+        </p>
       </div>
 
       {/* ── Right panel: steps ── */}
-      <div className="flex flex-1 flex-col bg-zinc-950 px-6 py-10 md:px-16 md:py-16">
-        <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
-          {/* Section label */}
-          <p className="mb-8 text-xs font-medium uppercase tracking-widest text-zinc-500">
+      <div className="flex flex-1 flex-col bg-zinc-950 px-6 py-8 md:px-10 md:py-10">
+        <div className="flex w-full flex-1 flex-col">
+          {/* Section heading */}
+          <h1 className="mb-6 text-2xl font-semibold tracking-tight text-white">
             Onboarding
-          </p>
+          </h1>
 
           {/* Steps list */}
           <div className="flex-1">
@@ -174,7 +198,7 @@ export function OnboardingFlow() {
                     }`}
                   >
                     <div className="overflow-hidden">
-                      <div className="pb-5 pl-7">
+                      <div className="pb-5">
                         {step.id === 1 && (
                           <TeamSelector
                             onComplete={() => markComplete(1)}
@@ -274,7 +298,7 @@ function TeamSelector({ onComplete }: { onComplete: () => void }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-1">
         <Skeleton className="h-10 w-full rounded bg-white/5" />
         <Skeleton className="h-10 w-full rounded bg-white/5" />
       </div>
@@ -309,39 +333,31 @@ function TeamSelector({ onComplete }: { onComplete: () => void }) {
             type="button"
             disabled={isExchanging || isDone}
             onClick={() => handleSelectTeam(team)}
-            className="flex w-full items-center gap-3 rounded px-2 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            className="flex w-full items-center gap-3 rounded px-1 py-2 text-left transition-colors duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
-            {/* Avatar */}
-            {team.avatar ? (
-              <img
-                src={`https://vercel.com/api/www/avatar/${team.avatar}?s=40`}
-                alt=""
-                className="size-6 rounded-full bg-zinc-800"
+            {/* Avatar — use Vercel's avatar API with teamId for consistent fallback */}
+            <img
+              src={`https://vercel.com/api/www/avatar?teamId=${team.id}&s=48`}
+              alt=""
+              className="size-6 rounded-full bg-zinc-800"
+            />
+
+            {/* Team name only */}
+            <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
+              {team.name}
+            </span>
+
+            {/* Status indicator */}
+            {isSelected && isExchanging ? (
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-zinc-500" />
+            ) : isThisDone ? (
+              <Check
+                className="size-3.5 shrink-0 text-emerald-500"
+                strokeWidth={2.5}
               />
             ) : (
-              <div className="flex size-6 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-bold text-zinc-400">
-                {team.name.charAt(0).toUpperCase()}
-              </div>
-            )}
-
-            {/* Info */}
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm text-zinc-200">
-                {team.name}
-              </div>
-              <div className="truncate text-xs text-zinc-600">
-                {team.slug}
-              </div>
-            </div>
-
-            {/* Radio / Spinner / Check */}
-            {isSelected && isExchanging ? (
-              <Loader2 className="size-4 shrink-0 animate-spin text-zinc-500" />
-            ) : isThisDone ? (
-              <Check className="size-4 shrink-0 text-emerald-500" strokeWidth={2.5} />
-            ) : (
               <div
-                className={`size-4 shrink-0 rounded-full border ${
+                className={`size-3.5 shrink-0 rounded-full border transition-colors duration-150 ${
                   isSelected
                     ? "border-white bg-white"
                     : "border-zinc-600 bg-transparent"
