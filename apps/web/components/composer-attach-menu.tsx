@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Paperclip,
   Plug,
+  Plus,
   Settings2,
 } from "lucide-react";
 import { McpProviderIcon } from "@/components/mcp-icons";
@@ -115,7 +116,7 @@ export function ComposerAttachMenu({
           disabled={disabled}
           className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
         >
-          <Paperclip className="h-4 w-4" />
+          <Plus className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start" sideOffset={8}>
