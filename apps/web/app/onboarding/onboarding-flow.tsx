@@ -254,14 +254,13 @@ function TeamSelector({ onComplete }: { onComplete: () => void }) {
     "/api/vercel/teams",
     fetcher,
   );
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<VercelTeam | null>(null);
   const [isExchanging, setIsExchanging] = useState(false);
-  const [isDone, setIsDone] = useState(false);
+  const [showPicker, setShowPicker] = useState(true);
 
   const teams = data?.teams ?? [];
 
   const handleSelectTeam = async (team: VercelTeam) => {
-    setSelectedTeamId(team.id);
     setIsExchanging(true);
     try {
       const res = await fetch("/api/vercel/gateway-key", {
@@ -273,14 +272,14 @@ function TeamSelector({ onComplete }: { onComplete: () => void }) {
         const body = (await res.json()) as { error?: string };
         throw new Error(body.error ?? "Failed to exchange API key");
       }
-      setIsDone(true);
+      setSelectedTeam(team);
+      setShowPicker(false);
       onComplete();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to connect team",
         { position: "bottom-left" },
       );
-      setSelectedTeamId(null);
     } finally {
       setIsExchanging(false);
     }
@@ -311,44 +310,69 @@ function TeamSelector({ onComplete }: { onComplete: () => void }) {
     );
   }
 
-  return (
-    <div className="max-h-[200px] overflow-y-auto">
-      {teams.map((team) => {
-        const isSelected = selectedTeamId === team.id;
-        const isThisDone = isSelected && isDone;
+  // Selected state — show team card with Change button
+  if (selectedTeam && !showPicker) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-white/10 px-3 py-2.5">
+        <div className="flex items-center gap-3">
+          <img
+            src={`https://vercel.com/api/www/avatar?teamId=${selectedTeam.id}&s=64`}
+            alt=""
+            className="size-8 rounded-full bg-zinc-800"
+          />
+          <p className="text-sm font-medium text-zinc-200">
+            {selectedTeam.name}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPicker(true)}
+          className="text-xs text-zinc-500 underline-offset-2 transition-colors hover:text-zinc-300 hover:underline"
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
 
-        return (
+  // Picker state — show team list
+  return (
+    <div className="space-y-2">
+      {isExchanging && (
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <Loader2 className="size-3 animate-spin" />
+          Connecting…
+        </div>
+      )}
+      <div className="max-h-[200px] overflow-y-auto">
+        {teams.map((team) => (
           <button
             key={team.id}
             type="button"
-            disabled={isExchanging || isDone}
+            disabled={isExchanging}
             onClick={() => handleSelectTeam(team)}
-            className="flex w-full items-center gap-3 rounded px-1 py-2 text-left transition-colors duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            className="flex w-full items-center gap-3 rounded px-1 py-2 text-left transition-colors duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {/* Avatar — use Vercel's avatar API with teamId for consistent fallback */}
             <img
               src={`https://vercel.com/api/www/avatar?teamId=${team.id}&s=48`}
               alt=""
               className="size-6 rounded-full bg-zinc-800"
             />
-
-            {/* Team name only */}
             <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
               {team.name}
             </span>
-
-            {/* Status indicator */}
-            {isSelected && isExchanging ? (
-              <Loader2 className="size-3.5 shrink-0 animate-spin text-zinc-500" />
-            ) : isThisDone ? (
-              <Check
-                className="size-3.5 shrink-0 text-emerald-500"
-                strokeWidth={2.5}
-              />
-            ) : null}
           </button>
-        );
-      })}
+        ))}
+      </div>
+      {selectedTeam && (
+        <button
+          type="button"
+          onClick={() => setShowPicker(false)}
+          className="text-xs text-zinc-600 underline-offset-2 hover:text-zinc-400 hover:underline"
+        >
+          Cancel
+        </button>
+      )}
     </div>
   );
 }
@@ -358,6 +382,7 @@ function TeamSelector({ onComplete }: { onComplete: () => void }) {
 function GitHubConnector({ onComplete }: { onComplete: () => void }) {
   const { session, loading, hasGitHubAccount, hasGitHubInstallations } =
     useSession();
+  const [showConnect, setShowConnect] = useState(false);
 
   const isConnected = hasGitHubAccount && hasGitHubInstallations;
 
@@ -365,36 +390,83 @@ function GitHubConnector({ onComplete }: { onComplete: () => void }) {
     return <Skeleton className="h-10 w-full rounded bg-white/5" />;
   }
 
+  // Connected state — show profile card with Change button
+  if (isConnected && !showConnect) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between rounded-lg border border-white/10 px-3 py-2.5">
+          <div className="flex items-center gap-3">
+            {session?.user?.avatar ? (
+              <img
+                src={session.user.avatar}
+                alt=""
+                className="size-8 rounded-full bg-zinc-800"
+              />
+            ) : (
+              <div className="flex size-8 items-center justify-center rounded-full bg-zinc-800">
+                <Github className="size-4 text-zinc-400" />
+              </div>
+            )}
+            <div>
+              <p className="text-sm font-medium text-zinc-200">
+                {session?.user?.name ?? "GitHub"}
+              </p>
+              {session?.user?.username && (
+                <p className="text-xs text-zinc-600">
+                  @{session.user.username}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowConnect(true)}
+            className="text-xs text-zinc-500 underline-offset-2 transition-colors hover:text-zinc-300 hover:underline"
+          >
+            Change
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onComplete}
+          className="block text-xs text-zinc-600 underline-offset-2 transition-colors hover:text-zinc-400 hover:underline"
+        >
+          Continue
+        </button>
+      </div>
+    );
+  }
+
+  // Connect / reconnect state
   return (
     <div className="space-y-3">
-      {isConnected ? (
-        <div className="flex items-center gap-2.5">
-          <Check className="size-4 text-emerald-500" strokeWidth={2.5} />
-          <span className="text-sm text-zinc-300">
-            Connected as{" "}
-            <span className="text-white">
-              {session?.user?.name ?? "GitHub"}
-            </span>
-          </span>
-        </div>
-      ) : (
-        <a href="/api/auth/github/reconnect?next=/onboarding">
-          <Button
-            variant="outline"
-            className="gap-2 border-zinc-700 bg-transparent text-zinc-300 hover:bg-white/5 hover:text-white"
-          >
-            <Github className="size-4" />
-            Connect GitHub
-          </Button>
-        </a>
+      <a href="/api/auth/github/reconnect?next=/onboarding">
+        <Button
+          variant="outline"
+          className="gap-2 border-zinc-700 bg-transparent text-zinc-300 hover:bg-white/5 hover:text-white"
+        >
+          <Github className="size-4" />
+          {isConnected ? "Reconnect GitHub" : "Connect GitHub"}
+        </Button>
+      </a>
+      {isConnected && (
+        <button
+          type="button"
+          onClick={() => setShowConnect(false)}
+          className="block text-xs text-zinc-600 underline-offset-2 transition-colors hover:text-zinc-400 hover:underline"
+        >
+          Cancel
+        </button>
       )}
-      <button
-        type="button"
-        onClick={onComplete}
-        className="block text-xs text-zinc-600 underline-offset-2 transition-colors hover:text-zinc-400 hover:underline"
-      >
-        {isConnected ? "Continue" : "Skip for now"}
-      </button>
+      {!isConnected && (
+        <button
+          type="button"
+          onClick={onComplete}
+          className="block text-xs text-zinc-600 underline-offset-2 transition-colors hover:text-zinc-400 hover:underline"
+        >
+          Skip for now
+        </button>
+      )}
     </div>
   );
 }
