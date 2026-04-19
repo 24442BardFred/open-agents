@@ -136,8 +136,8 @@ export function useAudioRecording() {
         }
       };
 
-      recognition.start();
       setState("recording");
+      recognition.start();
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -151,7 +151,7 @@ export function useAudioRecording() {
       }
       speechRecognitionRef.current = null;
       setState("idle");
-      return true;
+      return false;
     }
   }, [setPermissionError]);
 
