@@ -72,13 +72,13 @@ export function useAudioRecording() {
   }, []);
 
   const startBrowserTranscription = useCallback(async () => {
-    const SpeechRecognition = getSpeechRecognitionConstructor();
-    if (!SpeechRecognition) {
+    const speechRecognitionConstructor = getSpeechRecognitionConstructor();
+    if (!speechRecognitionConstructor) {
       return false;
     }
 
     try {
-      const recognition = new SpeechRecognition();
+      const recognition = new speechRecognitionConstructor();
       speechRecognitionRef.current = recognition;
       speechTranscriptRef.current = "";
 
@@ -111,6 +111,7 @@ export function useAudioRecording() {
       };
 
       recognition.onerror = (event) => {
+        speechTranscriptRef.current = "";
         resetBrowserTranscription();
 
         switch (event.error) {

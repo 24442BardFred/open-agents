@@ -1149,7 +1149,7 @@ export function SessionChatContent({
     );
     inputRef.current?.focus();
     clearRecordingTranscript();
-  }, [recordingTranscript, clearRecordingTranscript, inputRef, setInput]);
+  }, [recordingTranscript, clearRecordingTranscript, setInput]);
 
   const handleCopyAssistantMessage = useCallback(
     async (messageId: string, text: string) => {
