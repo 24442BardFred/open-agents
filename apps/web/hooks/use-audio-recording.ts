@@ -66,6 +66,11 @@ export function useAudioRecording() {
     );
   }, []);
 
+  const resetBrowserTranscription = useCallback(() => {
+    speechRecognitionRef.current = null;
+    setState("idle");
+  }, []);
+
   const startBrowserTranscription = useCallback(async () => {
     const SpeechRecognition = getSpeechRecognitionConstructor();
     if (!SpeechRecognition) {
@@ -84,8 +89,12 @@ export function useAudioRecording() {
 
       recognition.onresult = (event) => {
         let nextTranscript = speechTranscriptRef.current;
-        for (let index = event.resultIndex; index < event.results.length; index++) {
-          const result = event.results[index];
+        for (
+          let resultIndex = event.resultIndex;
+          resultIndex < event.results.length;
+          resultIndex++
+        ) {
+          const result = event.results[resultIndex];
           if (!result?.isFinal) {
             continue;
           }
@@ -102,8 +111,7 @@ export function useAudioRecording() {
       };
 
       recognition.onerror = (event) => {
-        speechRecognitionRef.current = null;
-        setState("idle");
+        resetBrowserTranscription();
 
         switch (event.error) {
           case "not-allowed":
@@ -127,8 +135,7 @@ export function useAudioRecording() {
       };
 
       recognition.onend = () => {
-        speechRecognitionRef.current = null;
-        setState("idle");
+        resetBrowserTranscription();
 
         const nextTranscript = speechTranscriptRef.current.trim();
         if (nextTranscript) {
@@ -153,7 +160,7 @@ export function useAudioRecording() {
       setState("idle");
       return false;
     }
-  }, [setPermissionError]);
+  }, [resetBrowserTranscription, setPermissionError]);
 
   const startExternalRecording = useCallback(async () => {
     try {
