@@ -45,7 +45,8 @@ import { authClient } from "@/lib/auth/client";
 import type { GitHubConnectionReason } from "@/lib/github/connection-status";
 import { fetcher } from "@/lib/swr";
 
-const GITHUB_OAUTH_CALLBACK = "/api/github/post-link?next=/settings/connections";
+const GITHUB_OAUTH_CALLBACK =
+  "/api/github/post-link?next=/settings/connections";
 
 interface GitHubUserProfile {
   githubId: number;
